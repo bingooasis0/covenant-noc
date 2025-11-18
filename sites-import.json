@@ -1,0 +1,65 @@
+{
+  "sites": [
+    {
+      "name": "#1 DTD LZ John Rice",
+      "customer": "Covenant Technology",
+      "location": "1021 John R Rice Blvd, Murfreesboro, TN 37128",
+      "ip": "23.31.167.153",
+      "failoverIp": null,
+      "device": "MX67C-NA",
+      "devices": "MX67C-NA",
+      "monitoringIcmp": true,
+      "monitoringSnmp": false,
+      "monitoringMeraki": true,
+      "apiKey": null,
+      "notes": "Device: MX67C-NA\nMAC: bc:db:09:bc:e6:fc\nHostname: john-rice-vchzttzgmvjc.dynamic-m.com\nSerial: Q2HY-2WLY-2GSU\nWAN IPv6: 2601:483:800:4a16:bedb:9ff:febc:e6fd\nCellular: Integrated, Connecting",
+      "status": "operational"
+    },
+    {
+      "name": "#2 LZ Siegel",
+      "customer": "Covenant Technology",
+      "location": "3315 Siegel Rd, Murfreesboro, TN 37129",
+      "ip": "71.228.198.36",
+      "failoverIp": null,
+      "device": "MX67C-NA",
+      "devices": "MX67C-NA",
+      "monitoringIcmp": true,
+      "monitoringSnmp": false,
+      "monitoringMeraki": true,
+      "apiKey": null,
+      "notes": "Device: MX67C-NA\nMAC: bc:db:09:bf:57:68\nHostname: dtd-siegel-wired-ztpbbcmcmvjc.dynamic-m.com\nSerial: Q2HY-WHL7-FFLU\nWAN IPv6: 2001:558:6016:2a:bdf8:58a6:ae42:6396\nCellular: Integrated, Not Inserted\n\nISP: Comcast thru Entelegent\nIP BLOCK: 96.69.125.73 - 77\nMSK:255.255.255.248\nGW: 96.69.125.78\nPDNS:75.75.75.75\nSDNS:75.75.76.76\nCircuit: 500x35\nIdentifier: 50001523",
+      "status": "operational"
+    },
+    {
+      "name": "DTD Century City",
+      "customer": "Covenant Technology",
+      "location": "901 Perimeter Court, Nashville, TN 37214",
+      "ip": "96.74.40.161",
+      "failoverIp": null,
+      "device": "MX67C-NA",
+      "devices": "MX67C-NA",
+      "monitoringIcmp": true,
+      "monitoringSnmp": false,
+      "monitoringMeraki": true,
+      "apiKey": null,
+      "notes": "Device: MX67C-NA\nMAC: c4:8b:a3:48:86:0c\nHostname: dtd-century.city-wired-zcmkgmvwmvjc.dynamic-m.com\nSerial: Q2HY-KH4E-DCFS\nWAN IPv6: 2601:483:5900:87ce:c68b:a3ff:fe48:860d\nWAN 2: CELLULAR Integrated, Ready",
+      "status": "operational"
+    },
+    {
+      "name": "#4 LZ Veterans",
+      "customer": "Covenant Technology",
+      "location": "2043 Veterans Pkwy, Murfreesboro, TN 37128",
+      "ip": "98.211.35.67",
+      "failoverIp": null,
+      "device": "MX67C-NA",
+      "devices": "MX67C-NA",
+      "monitoringIcmp": true,
+      "monitoringSnmp": false,
+      "monitoringMeraki": true,
+      "apiKey": null,
+      "notes": "Device: MX67C-NA\nMAC: bc:db:09:bf:46:20\nHostname: dtd-veterans-wired-hhrhtbtkmvjc.dynamic-m.com\nSerial: Q2HY-VQYG-LXS9\nWAN IPv6: 2001:558:6016:3e:a5db:3ab7:1be4:9c17\nWAN 2: CELLULAR Integrated, Not Inserted\n\nISP: Comcast thru Entelegent\nIP BLOCK: 96.69.107.129 - 133\nMSK:255.255.255.248\nGW: 96.69.107.134\nPDNS:75.75.75.75\nSDNS:75.75.76.76\nCircuit: 500×35\nIdentifier: 50001523",
+      "status": "operational"
+    }
+  ]
+}
+

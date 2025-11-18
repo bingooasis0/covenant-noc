@@ -1,0 +1,102 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String   @id @default(uuid())
+  email         String   @unique
+  password      String
+  firstName     String?
+  lastName      String?
+  role          String   @default("user")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  refreshTokens RefreshToken[]
+  auditLogs     AuditLog[]
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
+
+model Site {
+  id                 String   @id @default(uuid())
+  name               String
+  customer           String
+  location           String
+  ip                 String
+  failoverIp         String?
+  latitude           Float?
+  longitude          Float?
+  isp                String?
+  device             String?
+  devices            String?
+  monitoringIcmp     Boolean  @default(true)
+  monitoringSnmp     Boolean  @default(false)
+  snmpCommunity      String?
+  snmpOid            String?
+  monitoringNetflow  Boolean  @default(false)
+  monitoringMeraki   Boolean  @default(false)
+  apiKey             String?
+  notes              String?
+  status             String   @default("unknown")
+  lastSeen           DateTime?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  monitoringData     MonitoringData[]
+  snmpData           SnmpData[]
+}
+
+model MonitoringData {
+  id        String   @id @default(uuid())
+  siteId    String
+  site      Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  latency   Float?
+  packetLoss Float?
+  jitter    Float?
+  timestamp DateTime @default(now())
+
+  @@index([siteId, timestamp])
+}
+
+model SnmpData {
+  id             String   @id @default(uuid())
+  siteId         String
+  site           Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  cpuUsage       Float?
+  memoryUsage    Float?
+  uptime         Int?
+  interfaceStats Json?
+  timestamp      DateTime @default(now())
+
+  @@index([siteId, timestamp])
+}
+
+model Preset {
+  id        String   @id @default(uuid())
+  name      String
+  config    Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action    String
+  details   Json?
+  timestamp DateTime @default(now())
+
+  @@index([timestamp])
+}

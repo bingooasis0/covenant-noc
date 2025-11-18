@@ -1,0 +1,732 @@
+const express = require('express');
+const helmet = require('helmet');
+const cors = require('cors');
+const rateLimit = require('express-rate-limit');
+const cookieParser = require('cookie-parser');
+// Trigger restart
+require('dotenv').config();
+
+const prisma = require('./prisma');
+const authRoutes = require('./auth/routes');
+const merakiRoutes = require('./routes/meraki');
+const { requireAuth } = require('./auth/middleware');
+const monitoring = require('./monitoring');
+const limits = require('./limits');
+const app = express();
+
+// Security middleware
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", "data:", "https:", "https://yt3.googleusercontent.com"],
+      connectSrc: ["'self'"],
+      fontSrc: ["'self'"],
+      objectSrc: ["'none'"],
+      mediaSrc: ["'self'"],
+      frameSrc: ["'none'"]
+    }
+  },
+  hsts: {
+    maxAge: 31536000,
+    includeSubDomains: true,
+    preload: true
+  }
+}));
+
+app.use(cors({
+  origin: process.env.CLIENT_URL || 'http://localhost:3001',
+  credentials: true
+}));
+
+app.use(express.json({ limit: '10mb' }));
+app.use(cookieParser());
+
+// Rate limiting
+const apiLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000, // 1 minute
+  max: 1000 // 1000 requests per minute (increased for monitoring)
+});
+
+// Auth routes (register, login, refresh, logout)
+app.use('/api/auth', authRoutes);
+
+// Meraki routes (devices, configuration, management)
+app.use('/api/meraki', merakiRoutes);
+
+// ============ HEALTH CHECK ============
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// ============ LIMITS & USAGE STATS ============
+app.get('/api/limits/usage', requireAuth, async (req, res) => {
+  try {
+    const stats = await limits.getUsageStats();
+    res.json(stats);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to get usage stats' });
+  }
+});
+
+// ============ GEOCODING ROUTE (OpenStreetMap Nominatim - FREE) ============
+app.get('/api/geocode', requireAuth, apiLimiter, async (req, res) => {
+  const { address } = req.query;
+
+  if (!address) {
+    return res.status(400).json({ error: 'Address required' });
+  }
+
+  try {
+    // Using OpenStreetMap Nominatim - completely free, no API key required
+    let response = await fetch(
+      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address)}&format=json&limit=1`,
+      {
+        headers: {
+          'User-Agent': 'NOCTURNAL-NOC-Dashboard/1.0'
+        }
+      }
+    );
+    let data = await response.json();
+
+    // If no results, try parsing and simplifying the address
+    if (!data || data.length === 0) {
+      const parts = address.split(',').map(p => p.trim());
+      if (parts.length >= 2) {
+        const simplified = parts.slice(-2).join(', ');
+        response = await fetch(
+          `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(simplified)}&format=json&limit=1`,
+          {
+            headers: {
+              'User-Agent': 'NOCTURNAL-NOC-Dashboard/1.0'
+            }
+          }
+        );
+        data = await response.json();
+      }
+    }
+
+    if (data && data.length > 0) {
+      const result = data[0];
+      res.json({
+        location: result.display_name,
+        latitude: parseFloat(result.lat),
+        longitude: parseFloat(result.lon)
+      });
+    } else {
+      res.status(404).json({ error: 'Location not found' });
+    }
+  } catch (err) {
+    console.error('Geocoding error:', err);
+    res.status(500).json({ error: 'Geocoding failed' });
+  }
+});
+
+// ============ SITES ROUTES ============
+app.get('/api/sites', requireAuth, async (req, res) => {
+  try {
+    const sites = await prisma.site.findMany({ orderBy: { createdAt: 'desc' } });
+    res.json(sites);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to fetch sites' });
+  }
+});
+
+app.post('/api/sites', requireAuth, async (req, res) => {
+  try {
+    const d = req.body;
+    
+    // Check storage limits before creating (estimate ~800 bytes per site)
+    await limits.checkBeforeCreate('Site', 800);
+    
+    const site = await prisma.site.create({
+      data: {
+        name: d.name, customer: d.customer, location: d.location, ip: d.ip,
+        failoverIp: d.failover_ip || null, latitude: d.latitude || null, longitude: d.longitude || null,
+        isp: d.isp || null, device: d.device || null, devices: d.devices || null,
+        monitoringIcmp: d.monitoring_icmp ?? true, monitoringSnmp: d.monitoring_snmp ?? false,
+        snmpCommunity: d.snmp_community || null, snmpOid: d.snmp_oid || null,
+        monitoringNetflow: d.monitoring_netflow ?? false, monitoringMeraki: d.monitoring_meraki ?? false,
+        apiKey: d.api_key || null, notes: d.notes || null, status: 'unknown'
+      }
+    });
+    if (site.monitoringIcmp) monitoring.startMonitoring(site.id, site.ip, site.failoverIp, site.monitoringSnmp ? site.snmpCommunity : null);
+    
+    // Check limits before creating audit log (~300 bytes)
+    await limits.checkBeforeCreate('AuditLog', 300);
+    await prisma.auditLog.create({ data: { userId: req.user.userId, action: 'site_created', details: { siteId: site.id, siteName: site.name } } });
+    res.json(site);
+  } catch (error) {
+    console.error(error);
+    if (error.message && error.message.includes('Storage limit exceeded')) {
+      res.status(507).json({ error: error.message }); // 507 Insufficient Storage
+    } else {
+      res.status(500).json({ error: 'Failed to create site' });
+    }
+  }
+});
+
+app.put('/api/sites/:id', requireAuth, async (req, res) => {
+  try {
+    const d = req.body;
+    const site = await prisma.site.update({
+      where: { id: req.params.id },
+      data: {
+        name: d.name, customer: d.customer, location: d.location, ip: d.ip,
+        failoverIp: d.failover_ip || null, latitude: d.latitude || null, longitude: d.longitude || null,
+        isp: d.isp || null, device: d.device || null, devices: d.devices || null,
+        monitoringIcmp: d.monitoring_icmp ?? true, monitoringSnmp: d.monitoring_snmp ?? false,
+        snmpCommunity: d.snmp_community || null, snmpOid: d.snmp_oid || null,
+        monitoringNetflow: d.monitoring_netflow ?? false, monitoringMeraki: d.monitoring_meraki ?? false,
+        apiKey: d.api_key || null, notes: d.notes || null
+      }
+    });
+    monitoring.stopMonitoring(site.id);
+    if (site.monitoringIcmp) monitoring.startMonitoring(site.id, site.ip, site.failoverIp, site.monitoringSnmp ? site.snmpCommunity : null);
+    await prisma.auditLog.create({ data: { userId: req.user.userId, action: 'site_updated', details: { siteId: site.id, siteName: site.name } } });
+    res.json(site);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to update site' });
+  }
+});
+
+app.delete('/api/sites/:id', requireAuth, async (req, res) => {
+  try {
+    const site = await prisma.site.findUnique({ where: { id: req.params.id } });
+    if (!site) return res.status(404).json({ error: 'Not found' });
+    monitoring.stopMonitoring(req.params.id);
+    await prisma.site.delete({ where: { id: req.params.id } });
+    await prisma.auditLog.create({ data: { userId: req.user.userId, action: 'site_deleted', details: { siteId: req.params.id, siteName: site.name } } });
+    res.json({ message: 'Deleted' });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to delete' });
+  }
+});
+
+app.delete('/api/sites', requireAuth, async (req, res) => {
+  try {
+    const { ids } = req.body;
+    if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids required' });
+    ids.forEach(id => monitoring.stopMonitoring(id));
+    await prisma.site.deleteMany({ where: { id: { in: ids } } });
+    await prisma.auditLog.create({ data: { userId: req.user.userId, action: 'sites_bulk_deleted', details: { siteIds: ids, count: ids.length } } });
+    res.json({ message: `${ids.length} deleted` });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to delete' });
+  }
+});
+
+// Export Sites
+app.get('/api/sites/export', requireAuth, async (req, res) => {
+  try {
+    const sites = await prisma.site.findMany({
+      orderBy: { createdAt: 'desc' }
+    });
+
+    res.json({ sites });
+  } catch (error) {
+    console.error('Export failed:', error);
+    res.status(500).json({ error: 'Failed to export sites' });
+  }
+});
+
+// Import Sites
+app.post('/api/sites/import', requireAuth, async (req, res) => {
+  try {
+    const payload = Array.isArray(req.body) ? req.body : req.body?.sites;
+
+    if (!Array.isArray(payload) || payload.length === 0) {
+      return res.status(400).json({ error: 'No sites provided for import' });
+    }
+
+    const userId = req.user.userId;
+    const summary = { created: 0, updated: 0, skipped: 0, errors: [] };
+    const restartQueue = [];
+
+    const toBool = (value) => {
+      if (typeof value === 'boolean') return value;
+      if (typeof value === 'number') return value !== 0;
+      if (typeof value === 'string') {
+        const normalized = value.trim().toLowerCase();
+        return ['true', '1', 'yes', 'y', 'enabled', 'on'].includes(normalized);
+      }
+      return !!value;
+    };
+
+    const cleanString = (value) => {
+      if (value === undefined || value === null) return null;
+      const str = String(value).trim();
+      return str.length === 0 ? null : str;
+    };
+
+    const parseNumber = (value) => {
+      if (value === undefined || value === null || value === '') return null;
+      const num = Number(value);
+      return Number.isFinite(num) ? num : null;
+    };
+
+    for (let i = 0; i < payload.length; i++) {
+      const site = payload[i];
+      const customer = cleanString(site.customer) || '';
+      const name = cleanString(site.name) || '';
+      const ip = cleanString(site.ip) || '';
+
+      if (!customer || !name || !ip) {
+        summary.skipped += 1;
+        summary.errors.push(`Entry ${i + 1}: Missing required fields (customer, name, ip).`);
+        continue;
+      }
+
+      const siteData = {
+        customer,
+        name,
+        ip,
+        failoverIp: cleanString(site.failoverIp || site.failover_ip),
+        location: cleanString(site.location),
+        latitude: parseNumber(site.latitude),
+        longitude: parseNumber(site.longitude),
+        isp: cleanString(site.isp),
+        device: cleanString(site.device) || null,
+        devices: cleanString(site.devices),
+        monitoringIcmp: toBool(site.monitoringIcmp ?? site.monitoring_icmp ?? true),
+        monitoringSnmp: toBool(site.monitoringSnmp ?? site.monitoring_snmp ?? false),
+        snmpCommunity: cleanString(site.snmpCommunity || site.snmp_community),
+        snmpOid: cleanString(site.snmpOid || site.snmp_oid),
+        monitoringNetflow: toBool(site.monitoringNetflow ?? site.monitoring_netflow ?? false),
+        monitoringMeraki: toBool(site.monitoringMeraki ?? site.monitoring_meraki ?? false),
+        apiKey: cleanString(site.apiKey || site.api_key),
+        notes: cleanString(site.notes),
+        status: cleanString(site.status) || 'unknown'
+      };
+
+      try {
+        let targetId = null;
+        let existingSite = null;
+
+        // Check by ID first
+        if (site.id) {
+          existingSite = await prisma.site.findUnique({
+            where: { id: site.id }
+          });
+          if (existingSite) targetId = existingSite.id;
+        }
+
+        // Check by IP if not found by ID
+        if (!targetId) {
+          existingSite = await prisma.site.findFirst({
+            where: { ip }
+          });
+          if (existingSite) targetId = existingSite.id;
+        }
+
+        if (targetId) {
+          // Update existing
+          await prisma.site.update({
+            where: { id: targetId },
+            data: siteData
+          });
+          summary.updated += 1;
+          restartQueue.push({ id: targetId, ip, failoverIp: siteData.failoverIp, monitoringIcmp: siteData.monitoringIcmp, monitoringSnmp: siteData.monitoringSnmp, snmpCommunity: siteData.snmpCommunity });
+        } else {
+          // Check storage limits before creating (estimate ~800 bytes per site)
+          await limits.checkBeforeCreate('Site', 800);
+
+          const newSite = await prisma.site.create({ data: siteData });
+          summary.created += 1;
+          restartQueue.push({ id: newSite.id, ip, failoverIp: siteData.failoverIp, monitoringIcmp: siteData.monitoringIcmp, monitoringSnmp: siteData.monitoringSnmp, snmpCommunity: siteData.snmpCommunity });
+        }
+      } catch (err) {
+        summary.skipped += 1;
+        summary.errors.push(`Entry ${i + 1}: ${err.message}`);
+      }
+    }
+
+    // Restart monitoring for affected sites
+    restartQueue.forEach(item => {
+      monitoring.stopMonitoring(item.id);
+      if (item.monitoringIcmp) {
+        monitoring.startMonitoring(item.id, item.ip, item.failoverIp, item.monitoringSnmp ? item.snmpCommunity : null);
+      }
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        userId,
+        action: 'sites_imported',
+        details: { created: summary.created, updated: summary.updated, skipped: summary.skipped }
+      }
+    });
+
+    res.json(summary);
+  } catch (error) {
+    console.error('Import failed:', error);
+    res.status(500).json({ error: 'Failed to import sites' });
+  }
+});
+
+// ============ MONITORING ROUTES ============
+app.get('/api/monitoring/:siteId', requireAuth, async (req, res) => {
+  try {
+    const data = await prisma.monitoringData.findFirst({ where: { siteId: req.params.siteId }, orderBy: { timestamp: 'desc' } });
+    res.json(data || { latency: null, packetLoss: null, jitter: null, timestamp: null });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to fetch data' });
+  }
+});
+
+app.get('/api/monitoring/:siteId/history', requireAuth, async (req, res) => {
+  try {
+    const hours = parseInt(req.query.hours) || 24;
+    const since = new Date();
+    since.setHours(since.getHours() - hours);
+    const history = await prisma.monitoringData.findMany({ where: { siteId: req.params.siteId, timestamp: { gte: since } }, orderBy: { timestamp: 'asc' } });
+    res.json(history);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to fetch history' });
+  }
+});
+
+app.get('/api/monitoring/:siteId/snmp', requireAuth, async (req, res) => {
+  try {
+    const data = await prisma.snmpData.findFirst({ where: { siteId: req.params.siteId }, orderBy: { timestamp: 'desc' } });
+    res.json(data || { cpuUsage: null, memoryUsage: null, uptime: null, interfaceStats: null, timestamp: null });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to fetch SNMP' });
+  }
+});
+
+app.get('/api/monitoring/:siteId/netflow', requireAuth, (req, res) => {
+  res.json({ message: 'NetFlow coming soon' });
+});
+
+app.get('/api/monitoring/:siteId/meraki', requireAuth, async (req, res) => {
+  try {
+    const site = await prisma.site.findUnique({ where: { id: req.params.siteId } });
+    if (!site) {
+      return res.status(404).json({ error: 'Site not found' });
+    }
+
+    if (!site.monitoringMeraki || !site.apiKey) {
+      return res.json({ error: 'Meraki monitoring not enabled or API key missing' });
+    }
+
+    const merakiApi = require('./meraki-api');
+    const metrics = await merakiApi.getDeviceMetrics(site.apiKey, site.ip);
+    res.json(metrics);
+  } catch (error) {
+    console.error('Meraki API error:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ============ PRESETS ROUTES ============
+app.get('/api/presets', requireAuth, async (req, res) => {
+  try {
+    const presets = await prisma.preset.findMany({ orderBy: { createdAt: 'desc' } });
+    res.json(presets);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to fetch presets' });
+  }
+});
+
+app.post('/api/presets', requireAuth, async (req, res) => {
+  try {
+    // Estimate size based on config size (rough estimate: 500 bytes base + config size)
+    const configSize = JSON.stringify(req.body.config || {}).length;
+    await limits.checkBeforeCreate('Preset', 500 + configSize);
+    
+    const preset = await prisma.preset.create({ data: { name: req.body.name, config: req.body.config } });
+    res.json(preset);
+  } catch (error) {
+    console.error(error);
+    if (error.message && error.message.includes('Storage limit exceeded')) {
+      res.status(507).json({ error: error.message }); // 507 Insufficient Storage
+    } else {
+      res.status(500).json({ error: 'Failed to create preset' });
+    }
+  }
+});
+
+app.put('/api/presets/:id', requireAuth, async (req, res) => {
+  try {
+    const preset = await prisma.preset.update({ where: { id: req.params.id }, data: { name: req.body.name, config: req.body.config } });
+    res.json(preset);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to update preset' });
+  }
+});
+
+app.delete('/api/presets/:id', requireAuth, async (req, res) => {
+  try {
+    await prisma.preset.delete({ where: { id: req.params.id } });
+    res.json({ message: 'Deleted' });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to delete' });
+  }
+});
+
+// ============ AUDIT LOG ROUTES ============
+app.get('/api/audit', requireAuth, async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 100;
+    const logs = await prisma.auditLog.findMany({ take: limit, orderBy: { timestamp: 'desc' }, include: { user: { select: { email: true, firstName: true, lastName: true } } } });
+    res.json(logs);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to fetch logs' });
+  }
+});
+
+app.post('/api/audit', requireAuth, async (req, res) => {
+  try {
+    // Estimate size based on details size (~300 bytes base + details size)
+    const detailsSize = JSON.stringify(req.body.details || {}).length;
+    await limits.checkBeforeCreate('AuditLog', 300 + detailsSize);
+    
+    const log = await prisma.auditLog.create({ data: { userId: req.user.userId, action: req.body.action, details: req.body.details || {} } });
+    res.json(log);
+  } catch (error) {
+    console.error(error);
+    if (error.message && error.message.includes('Storage limit exceeded')) {
+      res.status(507).json({ error: error.message }); // 507 Insufficient Storage
+    } else {
+      res.status(500).json({ error: 'Failed to create log' });
+    }
+  }
+});
+
+// ============ USER MANAGEMENT ROUTES ============
+app.get('/api/users', requireAuth, async (req, res) => {
+  try {
+    const users = await prisma.user.findMany({
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        role: true,
+        createdAt: true,
+        updatedAt: true
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+    res.json(users);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to fetch users' });
+  }
+});
+
+app.post('/api/users', requireAuth, async (req, res) => {
+  try {
+    const { email, password, firstName, lastName, role } = req.body;
+
+    if (!email || !password) {
+      return res.status(400).json({ error: 'Email and password required' });
+    }
+
+    if (password.length < 6) {
+      return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    }
+
+    // Check if email exists
+    const existing = await prisma.user.findUnique({ where: { email } });
+    if (existing) {
+      return res.status(400).json({ error: 'Email already exists' });
+    }
+
+    // Check storage limits before creating user (~500 bytes)
+    await limits.checkBeforeCreate('User', 500);
+
+    const bcrypt = require('bcrypt');
+    const hashedPassword = await bcrypt.hash(password, 12);
+
+    const user = await prisma.user.create({
+      data: {
+        email,
+        password: hashedPassword,
+        firstName: firstName || null,
+        lastName: lastName || null,
+        role: role || 'user'
+      },
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        role: true,
+        createdAt: true
+      }
+    });
+
+    // Check limits before creating audit log
+    await limits.checkBeforeCreate('AuditLog', 300);
+    await prisma.auditLog.create({ data: { userId: req.user.userId, action: 'user_created', details: { userId: user.id, email: user.email } } });
+    res.json(user);
+  } catch (error) {
+    console.error(error);
+    if (error.message && error.message.includes('Storage limit exceeded')) {
+      res.status(507).json({ error: error.message }); // 507 Insufficient Storage
+    } else {
+      res.status(500).json({ error: 'Failed to create user' });
+    }
+  }
+});
+
+app.put('/api/users/:id', requireAuth, async (req, res) => {
+  try {
+    const { email, password, firstName, lastName, role } = req.body;
+    const userId = req.params.id;
+
+    if (!email) {
+      return res.status(400).json({ error: 'Email required' });
+    }
+
+    // Check if email exists (excluding current user)
+    const existingEmail = await prisma.user.findFirst({
+      where: {
+        email,
+        NOT: { id: userId }
+      }
+    });
+    if (existingEmail) {
+      return res.status(400).json({ error: 'Email already exists' });
+    }
+
+    const updateData = {
+      email,
+      firstName: firstName || null,
+      lastName: lastName || null,
+      role: role || 'user'
+    };
+
+    // Update password if provided
+    if (password && password.trim()) {
+      if (password.length < 6) {
+        return res.status(400).json({ error: 'Password must be at least 6 characters' });
+      }
+      const bcrypt = require('bcrypt');
+      const hashedPassword = await bcrypt.hash(password, 12);
+      updateData.password = hashedPassword;
+    }
+
+    const user = await prisma.user.update({
+      where: { id: userId },
+      data: updateData,
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        role: true,
+        updatedAt: true
+      }
+    });
+
+    await prisma.auditLog.create({ data: { userId: req.user.userId, action: 'user_updated', details: { userId: user.id, email: user.email } } });
+    res.json(user);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to update user' });
+  }
+});
+
+app.delete('/api/users/:id', requireAuth, async (req, res) => {
+  try {
+    const userId = req.params.id;
+
+    // Prevent deleting yourself
+    if (userId === req.user.userId) {
+      return res.status(400).json({ error: 'Cannot delete yourself' });
+    }
+
+    // Check if this is the last admin
+    const adminCount = await prisma.user.count({ where: { role: 'admin' } });
+    const userToDelete = await prisma.user.findUnique({ where: { id: userId } });
+
+    if (userToDelete?.role === 'admin' && adminCount <= 1) {
+      return res.status(400).json({ error: 'Cannot delete the last admin user' });
+    }
+
+    await prisma.user.delete({ where: { id: userId } });
+    await prisma.auditLog.create({ data: { userId: req.user.userId, action: 'user_deleted', details: { userId, email: userToDelete?.email } } });
+    res.json({ message: 'User deleted' });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to delete user' });
+  }
+});
+
+// Error handler
+app.use((err, req, res, next) => {
+  console.error(err);
+  res.status(500).json({ error: 'Internal error' });
+});
+
+// ============ START SERVER ============
+
+const PORT = process.env.PORT || 3000;
+
+// Serve static files in production
+if (process.env.NODE_ENV === 'production') {
+  app.use(express.static('dist'));
+  app.get('*', (req, res) => {
+    res.sendFile('dist/index.html', { root: '.' });
+  });
+}
+
+app.listen(PORT, async () => {
+  console.log(`✓ Server running on port ${PORT}`);
+  console.log(`✓ Environment: ${process.env.NODE_ENV || 'development'}`);
+
+  // Initialize monitoring for all existing sites
+  try {
+    const sites = await prisma.site.findMany({
+      where: { monitoringIcmp: true }
+    });
+
+    sites.forEach(site => {
+      const snmpCommunity = site.monitoringSnmp ? site.snmpCommunity : null;
+      monitoring.startMonitoring(site.id, site.ip, site.failoverIp, snmpCommunity);
+    });
+
+    console.log(`✓ Started monitoring ${sites.length} sites`);
+  } catch (err) {
+    console.error('Error initializing monitoring:', err.message);
+  }
+
+  // Initialize limits monitoring and cleanup
+  try {
+    // Run initial cleanup
+    await limits.runAutomaticCleanup();
+    
+    // Log current usage
+    const usage = await limits.getUsageStats();
+    if (usage.storage) {
+      console.log(`✓ Storage usage: ${usage.storage.used} GB / ${usage.storage.limit} GB (${usage.storage.percentage.toFixed(1)}%)`);
+      if (usage.storage.percentage > 80) {
+        console.warn(`⚠️  WARNING: Storage usage is at ${usage.storage.percentage.toFixed(1)}% - consider cleanup`);
+      }
+    }
+    
+    // Run cleanup every 6 hours
+    setInterval(async () => {
+      await limits.runAutomaticCleanup();
+    }, 6 * 60 * 60 * 1000);
+  } catch (err) {
+    console.error('Error initializing limits monitoring:', err.message);
+  }
+});

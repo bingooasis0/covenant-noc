@@ -1,0 +1,40 @@
+                              borderRadius: '4px',
+                              cursor: 'pointer',
+                              fontSize: '11px'
+                            }}
+                          >
+                            Edit
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Activity Logs */}
+                <div style={{ marginTop: '20px' }}>
+                  <h4 style={{ margin: '0 0 12px 0', fontSize: '13px', fontWeight: 600' }}>Recent Activity</h4>
+                  <div style={{ padding: '12px', background: theme.bgSecondary, borderRadius: '6px', border: `1px solid ${theme.border}` }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '11px', color: theme.textMuted }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span>{user.username} logged in</span>
+                        <span>Just now</span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span>operator_user created site "Houston Office"</span>
+                        <span>2 hours ago</span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span>{user.username} updated monitoring settings</span>
+                        <span>5 hours ago</span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span>operator_user acknowledged alert for "Dallas DC"</span>
+                        <span>Yesterday</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}

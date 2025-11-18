@@ -1,0 +1,4 @@
+-- AlterTable
+ALTER TABLE "Site" ADD COLUMN "device" TEXT;
+ALTER TABLE "Site" ADD COLUMN "devices" TEXT;
+ALTER TABLE "Site" ADD COLUMN "isp" TEXT;

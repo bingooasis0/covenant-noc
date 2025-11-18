@@ -1,0 +1,282 @@
+const ping = require('ping');
+const prisma = require('./prisma');
+const snmp = require('./snmp');
+const merakiApi = require('./meraki-api');
+const limits = require('./limits');
+
+// Active monitoring intervals by site ID
+const monitoringIntervals = new Map();
+
+// Normalize values coming back from the ping library
+function normalizeMetric(value) {
+  if (value === null || value === undefined) return null;
+  if (value === 'unknown' || value === 'NaN' || value === '') return null;
+
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+// Ping a host and return metrics (numbers instead of strings)
+async function pingHost(host) {
+  try {
+    const res = await ping.promise.probe(host, {
+      timeout: 10,
+      extra: ['-n', '4'], // Send 4 packets
+    });
+
+    return {
+      alive: res.alive,
+      time: normalizeMetric(res.time),
+      packetLoss: normalizeMetric(res.packetLoss) ?? 0,
+      min: normalizeMetric(res.min),
+      max: normalizeMetric(res.max),
+      avg: normalizeMetric(res.avg),
+      stddev: normalizeMetric(res.stddev)
+    };
+  } catch (err) {
+    console.error(`Ping error for ${host}:`, err.message);
+    return {
+      alive: false,
+      time: null,
+      packetLoss: 100,
+      min: null,
+      max: null,
+      avg: null,
+      stddev: null
+    };
+  }
+}
+
+// Determine status based on metrics
+function calculateStatus(metrics) {
+  if (!metrics.alive || metrics.packetLoss >= 100) {
+    return 'critical'; // Host is down or 100% packet loss
+  }
+
+  if (metrics.packetLoss >= 75) {
+    return 'critical'; // 75%+ packet loss is critical
+  }
+
+  if (metrics.packetLoss >= 25 || (metrics.avg && metrics.avg > 150)) {
+    return 'degraded'; // 25%+ packet loss or >150ms latency
+  }
+
+  return 'operational'; // All good
+}
+
+// Monitor a single site
+async function monitorSite(siteId, primaryIp, failoverIp = null, snmpCommunity = null) {
+  let metrics = await pingHost(primaryIp);
+  let activeIp = primaryIp;
+  let usingFailover = false;
+
+  // Try failover if primary fails
+  if (!metrics.alive && failoverIp) {
+    console.log(`Primary ${primaryIp} down, trying failover ${failoverIp}`);
+    metrics = await pingHost(failoverIp);
+    if (metrics.alive) {
+      activeIp = failoverIp;
+      usingFailover = true;
+    }
+  }
+
+  const status = calculateStatus(metrics);
+
+  // Store monitoring data (check if site still exists first)
+  try {
+    const siteExists = await prisma.site.findUnique({ where: { id: siteId } });
+
+    if (!siteExists) {
+      console.log(`[Monitor] Site ${siteId} no longer exists, stopping monitoring`);
+      stopMonitoring(siteId);
+      return null;
+    }
+
+    // Check storage limits before creating (estimate ~100 bytes per record)
+    await limits.checkBeforeCreate('MonitoringData', 100);
+
+    await prisma.monitoringData.create({
+      data: {
+        siteId,
+        latency: metrics.avg,
+        packetLoss: metrics.packetLoss,
+        jitter: metrics.stddev
+      }
+    });
+  } catch (err) {
+    console.error(`[Monitor] Error storing data for site ${siteId}:`, err.message);
+    stopMonitoring(siteId);
+    return null;
+  }
+
+  // Collect SNMP metrics if enabled
+  if (snmpCommunity) {
+    try {
+      const snmpMetrics = await snmp.collectMetrics(activeIp, snmpCommunity);
+
+      // Check storage limits before creating (estimate ~200 bytes per record)
+      await limits.checkBeforeCreate('SnmpData', 200);
+
+      await prisma.snmpData.create({
+        data: {
+          siteId,
+          cpuUsage: snmpMetrics.cpu,
+          memoryUsage: snmpMetrics.memory?.usedPercent || null,
+          uptime: snmpMetrics.uptime,
+          interfaceStats: snmpMetrics.interfaces || {}
+        }
+      });
+
+      // Log based on what data we got
+      if (snmpMetrics.cpu || snmpMetrics.memory?.usedPercent) {
+        // Traditional SNMP devices (non-Meraki)
+        console.log(`[SNMP] Site ${siteId}: CPU ${snmpMetrics.cpu}%, Memory ${snmpMetrics.memory?.usedPercent}%`);
+      } else if (snmpMetrics.interfaces && snmpMetrics.interfaces.length > 0) {
+        // Meraki devices (interface data only)
+        const activeInterfaces = snmpMetrics.interfaces.filter(i => i.status === 'up').length;
+        console.log(`[SNMP] Site ${siteId}: ${activeInterfaces}/${snmpMetrics.interfaces.length} interfaces up`);
+      }
+    } catch (err) {
+      console.error(`[SNMP] Site ${siteId} error:`, err.message);
+    }
+  }
+
+  // Update site status
+  await prisma.site.update({
+    where: { id: siteId },
+    data: { status, lastSeen: new Date() }
+  });
+
+  console.log(`[Monitor] Site ${siteId} (${activeIp}): ${status} - ${metrics.avg}ms, ${metrics.packetLoss}% loss`);
+
+  return { ...metrics, status, usingFailover, activeIp };
+}
+
+// Start monitoring a site
+function startMonitoring(siteId, primaryIp, failoverIp = null, snmpCommunity = null, intervalSeconds = 60) {
+  // Stop existing monitoring if any
+  stopMonitoring(siteId);
+
+  console.log(`[Monitor] Starting monitoring for site ${siteId} - ${primaryIp}`);
+
+  // Initial ping
+  monitorSite(siteId, primaryIp, failoverIp, snmpCommunity);
+
+  // Set up interval
+  const interval = setInterval(() => {
+    monitorSite(siteId, primaryIp, failoverIp, snmpCommunity);
+  }, intervalSeconds * 1000);
+
+  monitoringIntervals.set(siteId, interval);
+}
+
+// Stop monitoring a site
+function stopMonitoring(siteId) {
+  const interval = monitoringIntervals.get(siteId);
+  if (interval) {
+    clearInterval(interval);
+    monitoringIntervals.delete(siteId);
+    console.log(`[Monitor] Stopped monitoring for site ${siteId}`);
+  }
+}
+
+// Start monitoring all sites for a user
+async function startMonitoringForUser(userId) {
+  const sites = await prisma.site.findMany({
+    where: { monitoringIcmp: true }
+  });
+
+  sites.forEach(site => {
+    const snmpCommunity = site.monitoringSnmp ? site.snmpCommunity : null;
+    startMonitoring(site.id, site.ip, site.failoverIp, snmpCommunity);
+  });
+
+  console.log(`[Monitor] Started monitoring ${sites.length} sites`);
+}
+
+// Get latest monitoring data for a site
+async function getLatestMetrics(siteId) {
+  return await prisma.monitoringData.findFirst({
+    where: { siteId },
+    orderBy: { timestamp: 'desc' }
+  });
+}
+
+// Get monitoring history for graphs
+async function getMetricsHistory(siteId, hours = 1) {
+  const since = new Date();
+  since.setHours(since.getHours() - hours);
+
+  return await prisma.monitoringData.findMany({
+    where: {
+      siteId,
+      timestamp: { gte: since }
+    },
+    orderBy: { timestamp: 'asc' }
+  });
+}
+
+// Get latest SNMP data for a site
+async function getLatestSnmpMetrics(siteId) {
+  return await prisma.snmpData.findFirst({
+    where: { siteId },
+    orderBy: { timestamp: 'desc' }
+  });
+}
+
+// Calculate uptime percentage over a rolling window
+async function calculateUptime(siteId, hours = 24) {
+  const since = new Date();
+  since.setHours(since.getHours() - hours);
+
+  const site = await prisma.site.findUnique({
+    where: { id: siteId },
+    include: {
+      monitoringData: {
+        where: { timestamp: { gte: since } }
+      }
+    }
+  });
+
+  if (!site || !site.monitoringData.length) {
+    return null;
+  }
+
+  const total = site.monitoringData.length;
+  const upCount = site.monitoringData.filter(d => d.status !== 'critical').length;
+  const uptime = (upCount / total) * 100;
+  return Number(uptime.toFixed(1));
+}
+
+// Cleanup old monitoring data (delegated to limits module)
+async function cleanupOldData() {
+  await limits.runAutomaticCleanup();
+}
+
+// Get Meraki API metrics
+async function getMerakiMetrics(deviceIp, apiKey) {
+  try {
+    const metrics = await merakiApi.getDeviceMetrics(apiKey, deviceIp);
+    return metrics;
+  } catch (err) {
+    console.error(`[Meraki API] Error getting metrics for ${deviceIp}:`, err.message);
+    return { error: err.message };
+  }
+}
+
+// Run cleanup every hour (limits module handles retention policies)
+setInterval(cleanupOldData, 60 * 60 * 1000);
+
+module.exports = {
+  pingHost,
+  monitorSite,
+  startMonitoring,
+  stopMonitoring,
+  startMonitoringForUser,
+  getLatestMetrics,
+  getLatestSnmpMetrics,
+  getMetricsHistory,
+  calculateUptime,
+  getMerakiMetrics,
+  cleanupOldData
+};

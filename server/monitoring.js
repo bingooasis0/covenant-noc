@@ -7,6 +7,9 @@ const limits = require('./limits');
 // Active monitoring intervals by site ID
 const monitoringIntervals = new Map();
 
+// Track consecutive failures per site for hysteresis
+const siteStatusState = new Map(); // { siteId: { consecutiveFailures: 0 } }
+
 // Normalize values coming back from the ping library
 function normalizeMetric(value) {
   if (value === null || value === undefined) return null;
@@ -108,6 +111,34 @@ async function monitorSite(siteId, primaryIp, failoverIp = null, snmpCommunity =
 
   const status = calculateStatus(metrics);
 
+  // --- HYSTERESIS LOGIC START ---
+  // Prevent flapping by requiring consecutive failures before marking as critical
+  if (!siteStatusState.has(siteId)) {
+    siteStatusState.set(siteId, { consecutiveFailures: 0 });
+  }
+  
+  const state = siteStatusState.get(siteId);
+  let reportedStatus = status;
+
+  if (status === 'critical') {
+    state.consecutiveFailures++;
+    // Require 3 consecutive failures (approx 3 minutes) before alerting/changing status
+    if (state.consecutiveFailures < 3) {
+      // If previously operational/degraded, keep it that way for now to avoid blip
+      // If this is the first check ever, we might default to 'degraded' or allow 'critical' if unknown
+      // But generally we want to suppress the FIRST "down" signal
+      console.log(`[Monitor] Site ${siteId} check failed (${state.consecutiveFailures}/3), suppressing critical status.`);
+      reportedStatus = 'degraded'; // Show degraded instead of critical during verification phase
+    }
+  } else {
+    // If we get a good ping, reset immediately
+    if (state.consecutiveFailures > 0) {
+      console.log(`[Monitor] Site ${siteId} recovered after ${state.consecutiveFailures} failures.`);
+    }
+    state.consecutiveFailures = 0;
+  }
+  // --- HYSTERESIS LOGIC END ---
+
   // Store monitoring data (check if site still exists first)
   try {
     const siteExists = await prisma.site.findUnique({ where: { id: siteId } });
@@ -126,7 +157,11 @@ async function monitorSite(siteId, primaryIp, failoverIp = null, snmpCommunity =
         siteId,
         latency: metrics.avg,
         packetLoss: metrics.packetLoss,
-        jitter: metrics.stddev
+        jitter: metrics.stddev,
+        status: reportedStatus // Store the dampened status in history too, or keep raw? 
+        // User sees "100% loss" in graph, which comes from packetLoss field. 
+        // Status field mainly drives the color. 
+        // Let's store the dampened reportedStatus so the history table color matches the current status.
       }
     });
   } catch (err) {
@@ -183,12 +218,12 @@ async function monitorSite(siteId, primaryIp, failoverIp = null, snmpCommunity =
   // Update site status
   await prisma.site.update({
     where: { id: siteId },
-    data: { status, lastSeen: new Date() }
+    data: { status: reportedStatus, lastSeen: new Date() }
   });
 
-  console.log(`[Monitor] Site ${siteId} (${activeIp}): ${status} - ${metrics.avg}ms, ${metrics.packetLoss}% loss`);
+  console.log(`[Monitor] Site ${siteId} (${activeIp}): ${reportedStatus} (raw: ${status}) - ${metrics.avg}ms, ${metrics.packetLoss}% loss`);
 
-  return { ...metrics, status, usingFailover, activeIp };
+  return { ...metrics, status: reportedStatus, usingFailover, activeIp };
 }
 
 // Start monitoring a site
@@ -198,8 +233,8 @@ function startMonitoring(siteId, primaryIp, failoverIp = null, snmpCommunity = n
 
   console.log(`[Monitor] Starting monitoring for site ${siteId} - ${primaryIp}`);
 
-  // Add random startup delay (0-5s) to stagger checks and prevent server load spikes
-  const initialDelay = Math.floor(Math.random() * 5000);
+  // Add random startup delay (0-30s) to stagger checks and prevent server load spikes
+  const initialDelay = Math.floor(Math.random() * 30000);
   
   setTimeout(() => {
     // Initial ping

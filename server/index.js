@@ -691,7 +691,14 @@ const PORT = process.env.PORT || 3000;
 
 // Serve static files in production
 if (process.env.NODE_ENV === 'production') {
-  app.use(express.static('dist'));
+  // Serve static files with proper headers
+  app.use(express.static('dist', {
+    setHeaders: (res, path) => {
+      // Prevent HTTPS upgrade
+      res.setHeader('Strict-Transport-Security', 'max-age=0');
+      res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com https://fonts.googleapis.com data:; img-src 'self' data: https:; connect-src 'self' http://10.1.0.10:3000 http://localhost:3000;");
+    }
+  }));
   app.get('*', (req, res) => {
     res.sendFile('dist/index.html', { root: '.' });
   });

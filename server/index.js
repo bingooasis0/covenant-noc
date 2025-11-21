@@ -9,6 +9,8 @@ require('dotenv').config();
 const prisma = require('./prisma');
 const authRoutes = require('./auth/routes');
 const merakiRoutes = require('./routes/meraki');
+const toolsRoutes = require('./routes/tools');
+const cardConfigRoutes = require('./routes/card-config');
 const { requireAuth } = require('./auth/middleware');
 const monitoring = require('./monitoring');
 const limits = require('./limits');
@@ -55,6 +57,12 @@ app.use('/api/auth', authRoutes);
 
 // Meraki routes (devices, configuration, management)
 app.use('/api/meraki', merakiRoutes);
+
+// Tools routes (ping, traceroute)
+app.use('/api/tools', toolsRoutes);
+
+// Card Configuration routes
+app.use('/api/card-config', requireAuth, cardConfigRoutes);
 
 // ============ HEALTH CHECK ============
 app.get('/api/health', (req, res) => {
@@ -139,10 +147,10 @@ app.get('/api/sites', requireAuth, async (req, res) => {
 app.post('/api/sites', requireAuth, async (req, res) => {
   try {
     const d = req.body;
-    
+
     // Check storage limits before creating (estimate ~800 bytes per site)
     await limits.checkBeforeCreate('Site', 800);
-    
+
     const site = await prisma.site.create({
       data: {
         name: d.name, customer: d.customer, location: d.location, ip: d.ip,
@@ -151,11 +159,12 @@ app.post('/api/sites', requireAuth, async (req, res) => {
         monitoringIcmp: d.monitoring_icmp ?? true, monitoringSnmp: d.monitoring_snmp ?? false,
         snmpCommunity: d.snmp_community || null, snmpOid: d.snmp_oid || null,
         monitoringNetflow: d.monitoring_netflow ?? false, monitoringMeraki: d.monitoring_meraki ?? false,
-        apiKey: d.api_key || null, notes: d.notes || null, status: 'unknown'
+        apiKey: d.api_key || null, notes: d.notes || null, status: 'unknown',
+        monitoringInterval: d.monitoringInterval || 60
       }
     });
-    if (site.monitoringIcmp) monitoring.startMonitoring(site.id, site.ip, site.failoverIp, site.monitoringSnmp ? site.snmpCommunity : null);
-    
+    if (site.monitoringIcmp) monitoring.startMonitoring(site.id, site.ip, site.failoverIp, site.monitoringSnmp ? site.snmpCommunity : null, site.monitoringInterval);
+
     // Check limits before creating audit log (~300 bytes)
     await limits.checkBeforeCreate('AuditLog', 300);
     await prisma.auditLog.create({ data: { userId: req.user.userId, action: 'site_created', details: { siteId: site.id, siteName: site.name } } });
@@ -182,11 +191,11 @@ app.put('/api/sites/:id', requireAuth, async (req, res) => {
         monitoringIcmp: d.monitoring_icmp ?? true, monitoringSnmp: d.monitoring_snmp ?? false,
         snmpCommunity: d.snmp_community || null, snmpOid: d.snmp_oid || null,
         monitoringNetflow: d.monitoring_netflow ?? false, monitoringMeraki: d.monitoring_meraki ?? false,
-        apiKey: d.api_key || null, notes: d.notes || null
+        apiKey: d.api_key || null, notes: d.notes || null,
+        monitoringInterval: d.monitoringInterval || 60
       }
     });
-    monitoring.stopMonitoring(site.id);
-    if (site.monitoringIcmp) monitoring.startMonitoring(site.id, site.ip, site.failoverIp, site.monitoringSnmp ? site.snmpCommunity : null);
+    if (site.monitoringIcmp) monitoring.startMonitoring(site.id, site.ip, site.failoverIp, site.monitoringSnmp ? site.snmpCommunity : null, site.monitoringInterval);
     await prisma.auditLog.create({ data: { userId: req.user.userId, action: 'site_updated', details: { siteId: site.id, siteName: site.name } } });
     res.json(site);
   } catch (error) {
@@ -445,7 +454,7 @@ app.post('/api/presets', requireAuth, async (req, res) => {
     // Estimate size based on config size (rough estimate: 500 bytes base + config size)
     const configSize = JSON.stringify(req.body.config || {}).length;
     await limits.checkBeforeCreate('Preset', 500 + configSize);
-    
+
     const preset = await prisma.preset.create({ data: { name: req.body.name, config: req.body.config } });
     res.json(preset);
   } catch (error) {
@@ -495,7 +504,7 @@ app.post('/api/audit', requireAuth, async (req, res) => {
     // Estimate size based on details size (~300 bytes base + details size)
     const detailsSize = JSON.stringify(req.body.details || {}).length;
     await limits.checkBeforeCreate('AuditLog', 300 + detailsSize);
-    
+
     const log = await prisma.auditLog.create({ data: { userId: req.user.userId, action: req.body.action, details: req.body.details || {} } });
     res.json(log);
   } catch (error) {
@@ -700,7 +709,8 @@ app.listen(PORT, async () => {
 
     sites.forEach(site => {
       const snmpCommunity = site.monitoringSnmp ? site.snmpCommunity : null;
-      monitoring.startMonitoring(site.id, site.ip, site.failoverIp, snmpCommunity);
+      const interval = site.monitoringInterval || 60;
+      monitoring.startMonitoring(site.id, site.ip, site.failoverIp, snmpCommunity, interval);
     });
 
     console.log(`✓ Started monitoring ${sites.length} sites`);
@@ -712,7 +722,7 @@ app.listen(PORT, async () => {
   try {
     // Run initial cleanup
     await limits.runAutomaticCleanup();
-    
+
     // Log current usage
     const usage = await limits.getUsageStats();
     if (usage.storage) {
@@ -721,7 +731,7 @@ app.listen(PORT, async () => {
         console.warn(`⚠️  WARNING: Storage usage is at ${usage.storage.percentage.toFixed(1)}% - consider cleanup`);
       }
     }
-    
+
     // Run cleanup every 6 hours
     setInterval(async () => {
       await limits.runAutomaticCleanup();

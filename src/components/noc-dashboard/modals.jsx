@@ -35,7 +35,14 @@ import {
   LATENCY_WARN_THRESHOLD_MS
 } from './utils';
 import LoadingBar from './LoadingBar';
-import { Sparkline } from './views';
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  Tooltip as RechartsTooltip,
+  ResponsiveContainer
+} from 'recharts';
 import Tooltip from '../Tooltip';
 import {
   showSuccess,
@@ -182,78 +189,33 @@ const SiteDetailModal = ({ site, metrics, history, snmp, api, alerts, onClose, o
       <div style={{
         position: 'relative',
         borderRadius: '12px',
-        background,
+        background: theme.bgSecondary,
         border: `1px solid ${theme.borderLight}`,
-        padding: '12px 18px 40px',
+        padding: '12px 18px 12px',
         height: '200px',
         overflow: 'hidden'
       }}>
-        <div style={{ position: 'absolute', inset: '14px 20px 48px 20px', pointerEvents: 'none' }}>
-          <Sparkline
-            data={samples}
-            color={statusColor}
-            theme={theme}
-            height="100%"
-            strokeWidth={2.4}
-            areaOpacity={0.45}
-          />
-        </div>
-        {markerLines.map(line => {
-          const stop = toPercent(line.value);
-          if (stop <= 0 || stop >= 100) return null;
-          return (
-            <React.Fragment key={line.value}>
-              <div
-                style={{
-                  position: 'absolute',
-                  left: '20px',
-                  right: '20px',
-                  bottom: `${stop}%`,
-                  borderTop: `1px dashed ${withAlpha(line.color, 0.55)}`,
-                  opacity: 0.85
-                }}
+        <div style={{ width: '100%', height: '100%' }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={samples.map((v, i) => ({ value: v, index: i }))}>
+              <XAxis hide />
+              <YAxis hide domain={[0, 'auto']} />
+              <RechartsTooltip
+                contentStyle={{ backgroundColor: theme.bgSecondary, border: `1px solid ${theme.border}` }}
+                itemStyle={{ color: theme.text }}
+                labelStyle={{ display: 'none' }}
+                formatter={(value) => [`${Math.round(value)} ms`, 'Latency']}
               />
-              <span
-                style={{
-                  position: 'absolute',
-                  right: '24px',
-                  bottom: `${stop}%`,
-                  transform: 'translateY(35%)',
-                  fontSize: '10px',
-                  fontWeight: 600,
-                  color: line.color,
-                  background: withAlpha(theme.bg, 0.9),
-                  padding: '2px 6px',
-                  borderRadius: '12px'
-                }}
-              >
-                {line.label}
-              </span>
-            </React.Fragment>
-          );
-        })}
-        <div style={{
-          position: 'absolute',
-          left: '20px',
-          bottom: '12px',
-          fontSize: '11px',
-          color: theme.textSecondary,
-          display: 'flex',
-          gap: '16px',
-          flexWrap: 'wrap'
-        }}>
-          <span>Samples: <strong style={{ color: theme.text }}>{sampleCount}</strong></span>
-          <span>Peak: <strong style={{ color: theme.text }}>{formatLatency(peak)}</strong></span>
-          <span>Avg: <strong style={{ color: theme.text }}>{`${Math.round(average)} ms`}</strong></span>
-        </div>
-        <div style={{
-          position: 'absolute',
-          left: '20px',
-          top: '12px',
-          fontSize: '11px',
-          color: theme.textMuted
-        }}>
-          Scale auto-adjusted to {formatLatency(maxValue)}
+              <Line
+                type="monotone"
+                dataKey="value"
+                stroke={statusColor}
+                strokeWidth={2}
+                dot={false}
+                isAnimationActive={false}
+              />
+            </LineChart>
+          </ResponsiveContainer>
         </div>
       </div>
     );

@@ -18,6 +18,7 @@ model User {
   updatedAt     DateTime @updatedAt
   refreshTokens RefreshToken[]
   auditLogs     AuditLog[]
+  cardConfigs   CardConfiguration[]
 }
 
 model RefreshToken {
@@ -48,6 +49,8 @@ model Site {
   monitoringNetflow  Boolean  @default(false)
   monitoringMeraki   Boolean  @default(false)
   apiKey             String?
+  monitoringInterval Int      @default(60)
+  dashboardOptions   Json?
   notes              String?
   status             String   @default("unknown")
   lastSeen           DateTime?
@@ -99,4 +102,18 @@ model AuditLog {
   timestamp DateTime @default(now())
 
   @@index([timestamp])
+}
+
+model CardConfiguration {
+  id        String   @id @default(uuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  scope     String   @default("global") // global, site
+  targetId  String?  // siteId if scope is site
+  viewType  String   @default("noc") // noc, grid
+  layout    Json     // The component tree/order
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, scope, targetId, viewType])
 }

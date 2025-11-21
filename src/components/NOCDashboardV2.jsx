@@ -30,7 +30,7 @@ import {
 } from './noc-dashboard/utils';
 import { TableView, GridView, NOCView, MapView } from './noc-dashboard/views';
 import { SiteDetailModal, AddEditSiteModal, SettingsModal, ConfirmModal } from './noc-dashboard/modals';
-import CardEditorModal from './CardEditorModal';
+import CardEditorModal from './card-editor/CardEditorModal';
 import { authFetch } from '../utils/api';
 import Tooltip from './Tooltip';
 import {
@@ -156,7 +156,7 @@ const getStoredRefreshInterval = () => {
 // Enterprise NOC Dashboard - Designed for 100s of sites
 const NOCDashboardV2 = ({ user, onLogout, onShowCardShowcase, onShowAuditLog }) => {
   const navigate = useNavigate();
-  
+
   // Theme
   const [isDark, setIsDark] = useState(() => localStorage.getItem('noc-theme') === 'dark');
 
@@ -242,16 +242,16 @@ const NOCDashboardV2 = ({ user, onLogout, onShowCardShowcase, onShowAuditLog }) 
       const data = await res.json();
       const history = Array.isArray(data)
         ? data.map(point => {
-            const packetLoss = point.packetLoss !== null && point.packetLoss !== undefined ? Number(point.packetLoss) : null;
-            return {
-              timestamp: point.timestamp,
-              latency: point.latency !== null && point.latency !== undefined ? Number(point.latency) : null,
-              packetLoss: packetLoss,
-              jitter: point.jitter !== null && point.jitter !== undefined ? Number(point.jitter) : null,
-              // Derive isReachable from packetLoss (100% = down/not reachable)
-              isReachable: packetLoss !== null ? packetLoss < 100 : undefined
-            };
-          })
+          const packetLoss = point.packetLoss !== null && point.packetLoss !== undefined ? Number(point.packetLoss) : null;
+          return {
+            timestamp: point.timestamp,
+            latency: point.latency !== null && point.latency !== undefined ? Number(point.latency) : null,
+            packetLoss: packetLoss,
+            jitter: point.jitter !== null && point.jitter !== undefined ? Number(point.jitter) : null,
+            // Derive isReachable from packetLoss (100% = down/not reachable)
+            isReachable: packetLoss !== null ? packetLoss < 100 : undefined
+          };
+        })
         : [];
 
       setExtendedHistoryEntry(siteId, hours, {
@@ -339,7 +339,133 @@ const NOCDashboardV2 = ({ user, onLogout, onShowCardShowcase, onShowAuditLog }) 
   const [confirmModal, setConfirmModal] = useState(null); // { title, message, onConfirm }
   const [showNotifications, setShowNotifications] = useState(false);
   const [showCardEditor, setShowCardEditor] = useState(false);
-  const [cardConfigs, setCardConfigs] = useState({});
+  const [cardLayout, setCardLayout] = useState(null); // NOC view layout
+  const [gridCardLayouts, setGridCardLayouts] = useState({}); // Grid view layouts: { siteId: layout } or { 'global': layout }
+
+  // Load card configurations for both NOC and Grid views
+  useEffect(() => {
+    const loadCardConfigs = async () => {
+      try {
+        // Load NOC view global config
+        const nocRes = await authFetch('/api/card-config?viewType=noc&scope=global');
+        if (nocRes.ok) {
+          const nocData = await nocRes.json();
+          if (nocData && nocData.layout) {
+            // Support both old format (just layout array) and new format (object with layout and cardConfig)
+            const layoutData = Array.isArray(nocData.layout)
+              ? { layout: nocData.layout, cardConfig: nocData.cardConfig || {} }
+              : nocData.layout;
+            setCardLayout(layoutData);
+          }
+        }
+
+        // Load Grid view global config
+        const gridGlobalRes = await authFetch('/api/card-config?viewType=grid&scope=global');
+        if (gridGlobalRes.ok) {
+          const gridGlobalData = await gridGlobalRes.json();
+          if (gridGlobalData && gridGlobalData.layout) {
+            // Support both old format (just layout array) and new format (object with layout and cardConfig)
+            const layoutData = Array.isArray(gridGlobalData.layout) 
+              ? { layout: gridGlobalData.layout, cardConfig: gridGlobalData.cardConfig || {} }
+              : gridGlobalData.layout;
+            setGridCardLayouts(prev => ({ ...prev, 'global': layoutData }));
+          }
+        }
+
+        // Load Grid view site-specific configs for all sites
+        if (sites && sites.length > 0) {
+          const siteLayouts = {};
+          await Promise.all(sites.map(async (site) => {
+            try {
+              const siteRes = await authFetch(`/api/card-config?viewType=grid&scope=site&targetId=${site.id}`);
+              if (siteRes.ok) {
+                const siteData = await siteRes.json();
+                if (siteData && siteData.layout) {
+                  // Support both old format (just layout array) and new format (object with layout and cardConfig)
+                  const layoutData = Array.isArray(siteData.layout)
+                    ? { layout: siteData.layout, cardConfig: siteData.cardConfig || {} }
+                    : siteData.layout;
+                  siteLayouts[site.id] = layoutData;
+                }
+              }
+            } catch (err) {
+              // Ignore individual site errors
+            }
+          }));
+          if (Object.keys(siteLayouts).length > 0) {
+            setGridCardLayouts(prev => ({ ...prev, ...siteLayouts }));
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load card configs:', err);
+      }
+    };
+    if (user) {
+      loadCardConfigs();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, sites.length]);
+
+  const handleCardConfigSave = () => {
+    // Reload all configs after save
+    const loadCardConfigs = async () => {
+      try {
+        // Reload NOC view global config
+        const nocRes = await authFetch('/api/card-config?viewType=noc&scope=global');
+        if (nocRes.ok) {
+          const nocData = await nocRes.json();
+          if (nocData && nocData.layout) {
+            const layoutData = Array.isArray(nocData.layout)
+              ? { layout: nocData.layout, cardConfig: nocData.cardConfig || {} }
+              : nocData.layout;
+            setCardLayout(layoutData);
+          }
+        }
+
+        // Reload Grid view global config
+        const gridGlobalRes = await authFetch('/api/card-config?viewType=grid&scope=global');
+        if (gridGlobalRes.ok) {
+          const gridGlobalData = await gridGlobalRes.json();
+          if (gridGlobalData && gridGlobalData.layout) {
+            const layoutData = Array.isArray(gridGlobalData.layout)
+              ? { layout: gridGlobalData.layout, cardConfig: gridGlobalData.cardConfig || {} }
+              : gridGlobalData.layout;
+            setGridCardLayouts(prev => ({
+              ...prev,
+              'global': layoutData
+            }));
+          }
+        }
+
+        // Reload Grid view site-specific configs
+        if (sites && sites.length > 0) {
+          const siteLayouts = {};
+          await Promise.all(sites.map(async (site) => {
+            try {
+              const siteRes = await authFetch(`/api/card-config?viewType=grid&scope=site&targetId=${site.id}`);
+              if (siteRes.ok) {
+                const siteData = await siteRes.json();
+                if (siteData && siteData.layout) {
+                  const layoutData = Array.isArray(siteData.layout)
+                    ? { layout: siteData.layout, cardConfig: siteData.cardConfig || {} }
+                    : siteData.layout;
+                  siteLayouts[site.id] = layoutData;
+                }
+              }
+            } catch (err) {
+              // Ignore individual site errors
+            }
+          }));
+          setGridCardLayouts(prev => ({ ...prev, ...siteLayouts }));
+        }
+
+        notifyDataRefreshed('Card layout updated');
+      } catch (err) {
+        console.error('Failed to reload card configs:', err);
+      }
+    };
+    loadCardConfigs();
+  };
 
   // Alerts
   const [alerts, setAlerts] = useState([]);
@@ -748,16 +874,16 @@ const NOCDashboardV2 = ({ user, onLogout, onShowCardShowcase, onShowAuditLog }) 
       const data = await res.json();
       const history = Array.isArray(data)
         ? data.map(point => {
-            const packetLoss = point.packetLoss !== null && point.packetLoss !== undefined ? Number(point.packetLoss) : null;
-            return {
-              timestamp: point.timestamp,
-              latency: point.latency !== null && point.latency !== undefined ? Number(point.latency) : null,
-              packetLoss: packetLoss,
-              jitter: point.jitter !== null && point.jitter !== undefined ? Number(point.jitter) : null,
-              // Derive isReachable from packetLoss (100% = down/not reachable)
-              isReachable: packetLoss !== null ? packetLoss < 100 : undefined
-            };
-          })
+          const packetLoss = point.packetLoss !== null && point.packetLoss !== undefined ? Number(point.packetLoss) : null;
+          return {
+            timestamp: point.timestamp,
+            latency: point.latency !== null && point.latency !== undefined ? Number(point.latency) : null,
+            packetLoss: packetLoss,
+            jitter: point.jitter !== null && point.jitter !== undefined ? Number(point.jitter) : null,
+            // Derive isReachable from packetLoss (100% = down/not reachable)
+            isReachable: packetLoss !== null ? packetLoss < 100 : undefined
+          };
+        })
         : [];
       if (history.length === 0) {
         return;
@@ -1060,11 +1186,11 @@ const NOCDashboardV2 = ({ user, onLogout, onShowCardShowcase, onShowAuditLog }) 
     const alert = alerts.find(a => a.id === alertId);
     if (alert) {
       const alertType = alert.type === 'down' ? 'Site Down' :
-                       alert.type === 'latency' ? 'High Latency' :
-                       alert.type === 'packetloss' ? 'Packet Loss' :
-                       alert.type === 'cpu' ? 'High CPU' :
-                       alert.type === 'memory' ? 'High Memory' :
-                       'Alert';
+        alert.type === 'latency' ? 'High Latency' :
+          alert.type === 'packetloss' ? 'Packet Loss' :
+            alert.type === 'cpu' ? 'High CPU' :
+              alert.type === 'memory' ? 'High Memory' :
+                'Alert';
       notifyAlertAcknowledged(alertType);
     }
   };
@@ -1293,11 +1419,11 @@ const NOCDashboardV2 = ({ user, onLogout, onShowCardShowcase, onShowAuditLog }) 
             </Tooltip>
           )}
           <Tooltip content="Meraki Management - Configure and manage Meraki devices" position="bottom" isDark={isDark}>
-            <button 
+            <button
               style={buttonStyle}
               onClick={() => navigate('/dashboard/meraki')}
             >
-              <img 
+              <img
                 src="/icons/meraki/logo.jpg"
                 alt="Meraki"
                 style={{ width: '18px', height: '18px', borderRadius: '3px', objectFit: 'cover' }}
@@ -1344,15 +1470,26 @@ const NOCDashboardV2 = ({ user, onLogout, onShowCardShowcase, onShowAuditLog }) 
         <Tooltip content="Customize card layout and metrics" position="bottom" isDark={isDark}>
           <button
             onClick={() => setShowCardEditor(true)}
-            style={buttonPrimaryStyle}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '6px 12px',
+              background: theme.card,
+              border: `1px solid ${theme.border}`,
+              borderRadius: '6px',
+              color: theme.text,
+              cursor: 'pointer',
+              fontSize: '13px'
+            }}
           >
-            <Edit2 size={16} />
+            <Edit2 size={14} />
             Customize Cards
           </button>
         </Tooltip>
-
+        <div style={{ width: '1px', height: '24px', background: theme.border, margin: '0 8px' }} />
         {/* View mode */}
-        <div style={{ display: 'flex', gap: '4px', background: theme.card, borderRadius: '6px', padding: '4px', border: `1px solid ${theme.border}` }}>
+        <div style={{ display: 'flex', background: theme.card, borderRadius: '6px', border: `1px solid ${theme.border}`, padding: '2px' }}>
           <button
             onClick={() => setViewMode('table')}
             style={{
@@ -1674,6 +1811,7 @@ const NOCDashboardV2 = ({ user, onLogout, onShowCardShowcase, onShowAuditLog }) 
             setCardActiveTabs={setCardActiveTabs}
             theme={theme}
             loadingState={loadingState}
+            gridCardLayouts={gridCardLayouts}
           />
         )}
 
@@ -1699,6 +1837,7 @@ const NOCDashboardV2 = ({ user, onLogout, onShowCardShowcase, onShowAuditLog }) 
             setCardMenuOpen={setCardMenuOpen}
             setEditingSite={setEditingSite}
             deleteSite={deleteSite}
+            cardLayout={cardLayout}
           />
         )}
 
@@ -1713,6 +1852,14 @@ const NOCDashboardV2 = ({ user, onLogout, onShowCardShowcase, onShowAuditLog }) 
           />
         )}
       </div>
+
+      {/* Card Editor Modal */}
+      <CardEditorModal
+        isOpen={showCardEditor}
+        onClose={() => setShowCardEditor(false)}
+        theme={theme}
+        onSave={handleCardConfigSave}
+      />
 
       {/* Site detail modal */}
       {selectedSite && (
@@ -1769,25 +1916,7 @@ const NOCDashboardV2 = ({ user, onLogout, onShowCardShowcase, onShowAuditLog }) 
         />
       )}
 
-      {/* Card Editor Modal */}
-      <CardEditorModal
-        isOpen={showCardEditor}
-        onClose={() => setShowCardEditor(false)}
-        theme={theme}
-        sites={sites}
-        cardConfigs={cardConfigs}
-        onSave={(config, siteId) => {
-          if (siteId) {
-            setCardConfigs(prev => ({ ...prev, [siteId]: config }));
-            showInfo(`Card configuration saved for ${sites.find(s => s.id === siteId)?.name}`);
-          } else {
-            setCardConfigs({ global: config });
-            showInfo('Card configuration applied to all cards');
-          }
-          // Save to localStorage
-          localStorage.setItem('noc-card-configs', JSON.stringify(cardConfigs));
-        }}
-      />
+
 
       {/* Notifications dropdown */}
       {showNotifications && (

@@ -117,13 +117,26 @@ async function monitorSite(siteId, primaryIp, failoverIp = null, snmpCommunity =
       // Check storage limits before creating (estimate ~200 bytes per record)
       await limits.checkBeforeCreate('SnmpData', 200);
 
+      // Sanitize strings to remove null bytes
+      const sanitize = (obj) => {
+        if (typeof obj === 'string') return obj.replace(/\u0000/g, '');
+        if (typeof obj === 'object' && obj !== null) {
+          for (const key in obj) {
+            obj[key] = sanitize(obj[key]);
+          }
+        }
+        return obj;
+      };
+
+      const sanitizedMetrics = sanitize(snmpMetrics);
+
       await prisma.snmpData.create({
         data: {
           siteId,
-          cpuUsage: snmpMetrics.cpu,
-          memoryUsage: snmpMetrics.memory?.usedPercent || null,
-          uptime: snmpMetrics.uptime,
-          interfaceStats: snmpMetrics.interfaces || {}
+          cpuUsage: sanitizedMetrics.cpu,
+          memoryUsage: sanitizedMetrics.memory?.usedPercent || null,
+          uptime: sanitizedMetrics.uptime,
+          interfaceStats: sanitizedMetrics.interfaces || {}
         }
       });
 
@@ -188,7 +201,8 @@ async function startMonitoringForUser(userId) {
 
   sites.forEach(site => {
     const snmpCommunity = site.monitoringSnmp ? site.snmpCommunity : null;
-    startMonitoring(site.id, site.ip, site.failoverIp, snmpCommunity);
+    const interval = site.monitoringInterval || 60;
+    startMonitoring(site.id, site.ip, site.failoverIp, snmpCommunity, interval);
   });
 
   console.log(`[Monitor] Started monitoring ${sites.length} sites`);

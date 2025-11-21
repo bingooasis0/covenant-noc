@@ -598,6 +598,17 @@ const NOCDashboardV2 = ({ user, onLogout, onShowCardShowcase, onShowAuditLog }) 
     return () => document.removeEventListener('click', handleClickOutside);
   }, [cardMenuOpen]);
 
+  // Handle Escape key to exit Focus Mode
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape' && isFocusMode) {
+        setIsFocusMode(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isFocusMode]);
+
   // Load sites with periodic refresh
   useEffect(() => {
     if (!user) return;

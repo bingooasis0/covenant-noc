@@ -21,8 +21,8 @@ async function pingHost(host, retries = 2) {
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
       const res = await ping.promise.probe(host, {
-        timeout: 10, // 10 second timeout per ping
-        extra: ['-c', '3'], // Linux: send 3 packets (not -n which is Windows)
+        timeout: 15, // 15 second timeout per ping
+        extra: ['-c', '5'], // Linux: send 5 packets for better stability
       });
 
       // Check if we got valid response data (even if alive is false, we might have partial data)

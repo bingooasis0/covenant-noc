@@ -103,7 +103,10 @@ async function getAppliancePerformance(apiKey, networkId) {
     // We'll try to fetch it, but return null on 404 to avoid breaking the whole flow.
     return await makeRequest(`/networks/${networkId}/appliance/performance`, apiKey);
   } catch (err) {
-    console.warn('Error getting appliance performance (endpoint might be invalid for this network):', err.message);
+    // Only log error if it's NOT a 404 (which is expected for unsupported devices)
+    if (!err.message.includes('404')) {
+      console.warn('Error getting appliance performance:', err.message);
+    }
     return null;
   }
 }

@@ -35,7 +35,9 @@ app.use(helmet({
   // Disable HSTS for HTTP
   hsts: false,
   // Disable crossOriginOpenerPolicy for HTTP
-  crossOriginOpenerPolicy: false
+  crossOriginOpenerPolicy: false,
+  // Disable originAgentCluster to avoid warnings
+  originAgentCluster: false
 }));
 
 app.use(cors({

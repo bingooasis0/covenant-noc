@@ -21,16 +21,20 @@ async function pingHost(host, retries = 2) {
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
       const res = await ping.promise.probe(host, {
-        timeout: 15, // Increased timeout
-        extra: ['-n', '4'], // Send 4 packets
+        timeout: 10, // 10 second timeout per ping
+        extra: ['-c', '3'], // Linux: send 3 packets (not -n which is Windows)
       });
 
-      // If successful, return immediately
-      if (res.alive) {
+      // Check if we got valid response data (even if alive is false, we might have partial data)
+      const hasValidData = res.time !== undefined && res.time !== null && res.time !== 'unknown';
+      const packetLoss = normalizeMetric(res.packetLoss) ?? (res.alive ? 0 : 100);
+      
+      // If we have valid latency data OR host is alive, consider it successful
+      if (res.alive || hasValidData) {
         return {
-          alive: res.alive,
+          alive: res.alive || hasValidData,
           time: normalizeMetric(res.time),
-          packetLoss: normalizeMetric(res.packetLoss) ?? 0,
+          packetLoss: packetLoss,
           min: normalizeMetric(res.min),
           max: normalizeMetric(res.max),
           avg: normalizeMetric(res.avg),
@@ -41,20 +45,23 @@ async function pingHost(host, retries = 2) {
       // If failed and we have retries left, wait and retry
       if (attempt < retries) {
         console.log(`[Monitor] Ping failed for ${host}, retrying (attempt ${attempt + 1}/${retries})...`);
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        await new Promise(resolve => setTimeout(resolve, 2000)); // 2 second delay between retries
         continue;
       }
 
     } catch (err) {
-      console.error(`Ping error for ${host} (attempt ${attempt + 1}):`, err.message);
+      // Only log error if it's not a timeout (timeouts are expected for down hosts)
+      if (!err.message.includes('timeout') && !err.message.includes('ETIMEDOUT')) {
+        console.error(`[Monitor] Ping error for ${host} (attempt ${attempt + 1}):`, err.message);
+      }
       if (attempt < retries) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        await new Promise(resolve => setTimeout(resolve, 2000));
         continue;
       }
     }
   }
 
-  // All retries failed
+  // All retries failed - return failure result
   return {
     alive: false,
     time: null,

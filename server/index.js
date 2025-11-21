@@ -19,11 +19,10 @@ const app = express();
 // Security middleware - MINIMAL for HTTP-only operation
 app.use(helmet({
   contentSecurityPolicy: false,  // Disable CSP to avoid any upgrade issues
-  hsts: false,  // No HSTS
+  hsts: false,  // No HSTS - required for HTTP-only operation
   crossOriginOpenerPolicy: false,
   crossOriginResourcePolicy: false,
-  originAgentCluster: false,
-  strictTransportSecurity: false
+  originAgentCluster: false
 }));
 
 app.use(cors({

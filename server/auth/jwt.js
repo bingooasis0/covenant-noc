@@ -6,6 +6,13 @@ const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET;
 const JWT_ACCESS_EXPIRY = process.env.JWT_ACCESS_EXPIRY || '15m';
 const JWT_REFRESH_EXPIRY = process.env.JWT_REFRESH_EXPIRY || '7d';
 
+// Validate JWT secrets are set
+if (!JWT_ACCESS_SECRET || !JWT_REFRESH_SECRET) {
+  console.error('❌ ERROR: JWT_ACCESS_SECRET and JWT_REFRESH_SECRET must be set in .env file');
+  console.error('   Generate them with: node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"');
+  process.exit(1);
+}
+
 /**
  * Generate access token (short-lived, 15 minutes)
  */

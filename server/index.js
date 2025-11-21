@@ -16,28 +16,14 @@ const monitoring = require('./monitoring');
 const limits = require('./limits');
 const app = express();
 
-// Security middleware
+// Security middleware - MINIMAL for HTTP-only operation
 app.use(helmet({
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
-      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
-      styleSrcElem: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
-      imgSrc: ["'self'", "data:", "https:", "https://yt3.googleusercontent.com"],
-      connectSrc: ["'self'", "http://10.1.0.10:3000", "http://localhost:3000"],
-      fontSrc: ["'self'", "https://fonts.gstatic.com", "https://fonts.googleapis.com", "data:"],
-      objectSrc: ["'none'"],
-      mediaSrc: ["'self'"],
-      frameSrc: ["'none'"]
-    }
-  },
-  // Disable HSTS for HTTP
-  hsts: false,
-  // Disable crossOriginOpenerPolicy for HTTP
+  contentSecurityPolicy: false,  // Disable CSP to avoid any upgrade issues
+  hsts: false,  // No HSTS
   crossOriginOpenerPolicy: false,
-  // Disable originAgentCluster to avoid warnings
-  originAgentCluster: false
+  crossOriginResourcePolicy: false,
+  originAgentCluster: false,
+  strictTransportSecurity: false
 }));
 
 app.use(cors({
@@ -696,12 +682,16 @@ if (process.env.NODE_ENV === 'production') {
   // Serve static files with proper headers
   app.use(express.static('dist', {
     setHeaders: (res, path) => {
-      // Prevent HTTPS upgrade
-      res.setHeader('Strict-Transport-Security', 'max-age=0');
-      res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com https://fonts.googleapis.com data:; img-src 'self' data: https:; connect-src 'self' http://10.1.0.10:3000 http://localhost:3000;");
+      // Force HTTP, prevent any HTTPS upgrades
+      res.removeHeader('Strict-Transport-Security');
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
     }
   }));
   app.get('*', (req, res) => {
+    res.removeHeader('Strict-Transport-Security');
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     res.sendFile('dist/index.html', { root: '.' });
   });
 }

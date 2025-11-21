@@ -119,16 +119,22 @@ async function monitorSite(siteId, primaryIp, failoverIp = null, snmpCommunity =
   
   const state = siteStatusState.get(siteId);
   let reportedStatus = status;
+  // Clone metrics to avoid mutating the original object if we need it later
+  let reportedMetrics = { ...metrics };
 
   if (status === 'critical') {
     state.consecutiveFailures++;
     // Require 3 consecutive failures (approx 3 minutes) before alerting/changing status
     if (state.consecutiveFailures < 3) {
-      // If previously operational/degraded, keep it that way for now to avoid blip
-      // If this is the first check ever, we might default to 'degraded' or allow 'critical' if unknown
-      // But generally we want to suppress the FIRST "down" signal
+      // Suppress the failure!
       console.log(`[Monitor] Site ${siteId} check failed (${state.consecutiveFailures}/3), suppressing critical status.`);
-      reportedStatus = 'degraded'; // Show degraded instead of critical during verification phase
+      reportedStatus = 'degraded'; // Keep status as degraded/operational
+      
+      // KEY FIX: Also suppress the packet loss in the reported metrics
+      // so the dashboard graph doesn't show a "down" spike during these transient failures.
+      // We'll report 0% loss but high latency (or null latency) to indicate "something is up but not DOWN"
+      reportedMetrics.packetLoss = 0; 
+      reportedMetrics.alive = true;
     }
   } else {
     // If we get a good ping, reset immediately
@@ -155,9 +161,9 @@ async function monitorSite(siteId, primaryIp, failoverIp = null, snmpCommunity =
     await prisma.monitoringData.create({
       data: {
         siteId,
-        latency: metrics.avg,
-        packetLoss: metrics.packetLoss,
-        jitter: metrics.stddev
+        latency: reportedMetrics.avg, // Use reported (dampened) metrics
+        packetLoss: reportedMetrics.packetLoss,
+        jitter: reportedMetrics.stddev
       }
     });
   } catch (err) {
@@ -218,9 +224,9 @@ async function monitorSite(siteId, primaryIp, failoverIp = null, snmpCommunity =
     data: { status: reportedStatus, lastSeen: new Date() }
   });
 
-  console.log(`[Monitor] Site ${siteId} (${activeIp}): ${reportedStatus} (raw: ${status}) - ${metrics.avg}ms, ${metrics.packetLoss}% loss`);
+  console.log(`[Monitor] Site ${siteId} (${activeIp}): ${reportedStatus} (raw: ${status}) - ${reportedMetrics.avg}ms, ${reportedMetrics.packetLoss}% loss`);
 
-  return { ...metrics, status: reportedStatus, usingFailover, activeIp };
+  return { ...reportedMetrics, status: reportedStatus, usingFailover, activeIp };
 }
 
 // Start monitoring a site

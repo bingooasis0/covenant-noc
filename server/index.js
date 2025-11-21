@@ -21,23 +21,21 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "'unsafe-inline'"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'"],
       styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
       styleSrcElem: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
       imgSrc: ["'self'", "data:", "https:", "https://yt3.googleusercontent.com"],
-      connectSrc: ["'self'"],
-      fontSrc: ["'self'", "https://fonts.gstatic.com", "data:"],
+      connectSrc: ["'self'", "http://10.1.0.10:3000", "http://localhost:3000"],
+      fontSrc: ["'self'", "https://fonts.gstatic.com", "https://fonts.googleapis.com", "data:"],
       objectSrc: ["'none'"],
       mediaSrc: ["'self'"],
       frameSrc: ["'none'"]
     }
   },
-  // Only enable HSTS in production with HTTPS
-  hsts: process.env.NODE_ENV === 'production' && process.env.CLIENT_URL?.startsWith('https') ? {
-    maxAge: 31536000,
-    includeSubDomains: true,
-    preload: true
-  } : false
+  // Disable HSTS for HTTP
+  hsts: false,
+  // Disable crossOriginOpenerPolicy for HTTP
+  crossOriginOpenerPolicy: false
 }));
 
 app.use(cors({

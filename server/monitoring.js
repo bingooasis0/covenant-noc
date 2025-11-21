@@ -157,11 +157,7 @@ async function monitorSite(siteId, primaryIp, failoverIp = null, snmpCommunity =
         siteId,
         latency: metrics.avg,
         packetLoss: metrics.packetLoss,
-        jitter: metrics.stddev,
-        status: reportedStatus // Store the dampened status in history too, or keep raw? 
-        // User sees "100% loss" in graph, which comes from packetLoss field. 
-        // Status field mainly drives the color. 
-        // Let's store the dampened reportedStatus so the history table color matches the current status.
+        jitter: metrics.stddev
       }
     });
   } catch (err) {

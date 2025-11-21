@@ -162,7 +162,8 @@ async function monitorSite(siteId, primaryIp, failoverIp = null, snmpCommunity =
     });
   } catch (err) {
     console.error(`[Monitor] Error storing data for site ${siteId}:`, err.message);
-    stopMonitoring(siteId);
+    // Don't stop monitoring just because DB write failed (could be temporary)
+    // stopMonitoring(siteId); 
     return null;
   }
 

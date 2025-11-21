@@ -17,34 +17,53 @@ function normalizeMetric(value) {
 }
 
 // Ping a host and return metrics (numbers instead of strings)
-async function pingHost(host) {
-  try {
-    const res = await ping.promise.probe(host, {
-      timeout: 10,
-      extra: ['-n', '4'], // Send 4 packets
-    });
+async function pingHost(host, retries = 2) {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const res = await ping.promise.probe(host, {
+        timeout: 15, // Increased timeout
+        extra: ['-n', '4'], // Send 4 packets
+      });
 
-    return {
-      alive: res.alive,
-      time: normalizeMetric(res.time),
-      packetLoss: normalizeMetric(res.packetLoss) ?? 0,
-      min: normalizeMetric(res.min),
-      max: normalizeMetric(res.max),
-      avg: normalizeMetric(res.avg),
-      stddev: normalizeMetric(res.stddev)
-    };
-  } catch (err) {
-    console.error(`Ping error for ${host}:`, err.message);
-    return {
-      alive: false,
-      time: null,
-      packetLoss: 100,
-      min: null,
-      max: null,
-      avg: null,
-      stddev: null
-    };
+      // If successful, return immediately
+      if (res.alive) {
+        return {
+          alive: res.alive,
+          time: normalizeMetric(res.time),
+          packetLoss: normalizeMetric(res.packetLoss) ?? 0,
+          min: normalizeMetric(res.min),
+          max: normalizeMetric(res.max),
+          avg: normalizeMetric(res.avg),
+          stddev: normalizeMetric(res.stddev)
+        };
+      }
+      
+      // If failed and we have retries left, wait and retry
+      if (attempt < retries) {
+        console.log(`[Monitor] Ping failed for ${host}, retrying (attempt ${attempt + 1}/${retries})...`);
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        continue;
+      }
+
+    } catch (err) {
+      console.error(`Ping error for ${host} (attempt ${attempt + 1}):`, err.message);
+      if (attempt < retries) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        continue;
+      }
+    }
   }
+
+  // All retries failed
+  return {
+    alive: false,
+    time: null,
+    packetLoss: 100,
+    min: null,
+    max: null,
+    avg: null,
+    stddev: null
+  };
 }
 
 // Determine status based on metrics
@@ -172,15 +191,20 @@ function startMonitoring(siteId, primaryIp, failoverIp = null, snmpCommunity = n
 
   console.log(`[Monitor] Starting monitoring for site ${siteId} - ${primaryIp}`);
 
-  // Initial ping
-  monitorSite(siteId, primaryIp, failoverIp, snmpCommunity);
-
-  // Set up interval
-  const interval = setInterval(() => {
+  // Add random startup delay (0-5s) to stagger checks and prevent server load spikes
+  const initialDelay = Math.floor(Math.random() * 5000);
+  
+  setTimeout(() => {
+    // Initial ping
     monitorSite(siteId, primaryIp, failoverIp, snmpCommunity);
-  }, intervalSeconds * 1000);
 
-  monitoringIntervals.set(siteId, interval);
+    // Set up interval
+    const interval = setInterval(() => {
+      monitorSite(siteId, primaryIp, failoverIp, snmpCommunity);
+    }, intervalSeconds * 1000);
+
+    monitoringIntervals.set(siteId, interval);
+  }, initialDelay);
 }
 
 // Stop monitoring a site

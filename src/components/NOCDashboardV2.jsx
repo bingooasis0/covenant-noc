@@ -21,7 +21,8 @@ import {
   Plus,
   Bell,
   CheckCircle,
-  Edit2
+  Edit2,
+  Monitor
 } from 'lucide-react';
 import {
   withAlpha,
@@ -162,6 +163,7 @@ const NOCDashboardV2 = ({ user, onLogout, onShowCardShowcase, onShowAuditLog }) 
 
   // View state
   const [viewMode, setViewMode] = useState('grid'); // table, grid, map - default to grid
+  const [isFocusMode, setIsFocusMode] = useState(false); // Full screen focus mode
   const [sites, setSites] = useState([]);
   const [metricsData, setMetricsData] = useState({});
   const [snmpData, setSnmpData] = useState({});
@@ -1327,322 +1329,372 @@ const NOCDashboardV2 = ({ user, onLogout, onShowCardShowcase, onShowAuditLog }) 
       overflow: 'hidden'
     }}>
       {/* Header */}
-      <div style={{
-        background: theme.bgSecondary,
-        borderBottom: `1px solid ${theme.border}`,
-        padding: '8px 20px',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        position: 'sticky',
-        top: 0,
-        zIndex: 100,
-        boxShadow: `0 2px 8px ${theme.shadow}`,
-        flex: '0 0 auto'
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          <h1 style={{ margin: 0, fontSize: '18px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <Activity size={20} color={theme.primary} />
-            Covenant Technolog NOC
-          </h1>
+      {!isFocusMode && (
+        <div style={{
+          background: theme.bgSecondary,
+          borderBottom: `1px solid ${theme.border}`,
+          padding: '8px 20px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          position: 'sticky',
+          top: 0,
+          zIndex: 100,
+          boxShadow: `0 2px 8px ${theme.shadow}`,
+          flex: '0 0 auto'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+            <h1 style={{ margin: 0, fontSize: '18px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <Activity size={20} color={theme.primary} />
+              Covenant Technolog NOC
+            </h1>
 
-          {/* Stats */}
-          <div style={{ display: 'flex', gap: '12px', fontSize: '12px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-              <Server size={14} color={theme.textMuted} />
-              <span style={{ color: theme.textMuted }}>Total:</span>
-              <span style={{ fontWeight: 600 }}>{stats.total}</span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-              <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: theme.success }} />
-              <span style={{ fontWeight: 600, color: theme.success }}>{stats.online}</span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-              <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: theme.danger }} />
-              <span style={{ fontWeight: 600, color: theme.danger }}>{stats.offline}</span>
-            </div>
-            {stats.criticalAlerts > 0 && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '2px 6px', background: theme.dangerBg, borderRadius: '4px' }}>
-                <AlertTriangle size={14} color={theme.danger} />
-                <span style={{ fontWeight: 600, color: theme.danger }}>{stats.criticalAlerts}</span>
+            {/* Stats */}
+            <div style={{ display: 'flex', gap: '12px', fontSize: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <Server size={14} color={theme.textMuted} />
+                <span style={{ color: theme.textMuted }}>Total:</span>
+                <span style={{ fontWeight: 600 }}>{stats.total}</span>
               </div>
-            )}
-            {stats.warningAlerts > 0 && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '2px 6px', background: theme.warningBg, borderRadius: '4px' }}>
-                <AlertTriangle size={14} color={theme.warning} />
-                <span style={{ fontWeight: 600, color: theme.warning }}>{stats.warningAlerts}</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: theme.success }} />
+                <span style={{ fontWeight: 600, color: theme.success }}>{stats.online}</span>
               </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: theme.danger }} />
+                <span style={{ fontWeight: 600, color: theme.danger }}>{stats.offline}</span>
+              </div>
+              {stats.criticalAlerts > 0 && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '2px 6px', background: theme.dangerBg, borderRadius: '4px' }}>
+                  <AlertTriangle size={14} color={theme.danger} />
+                  <span style={{ fontWeight: 600, color: theme.danger }}>{stats.criticalAlerts}</span>
+                </div>
+              )}
+              {stats.warningAlerts > 0 && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '2px 6px', background: theme.warningBg, borderRadius: '4px' }}>
+                  <AlertTriangle size={14} color={theme.warning} />
+                  <span style={{ fontWeight: 600, color: theme.warning }}>{stats.warningAlerts}</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+            <span style={{ fontSize: '13px', color: theme.textSecondary }}>{user.email}</span>
+            <Tooltip content="View all alerts and notifications" position="bottom" isDark={isDark}>
+              <button
+                style={{ ...buttonStyle, position: 'relative' }}
+                onClick={() => setShowNotifications(!showNotifications)}
+              >
+                <Bell size={16} />
+                {stats.criticalAlerts + stats.warningAlerts > 0 && (
+                  <span style={{
+                    position: 'absolute',
+                    top: '-4px',
+                    right: '-4px',
+                    background: theme.danger,
+                    color: '#fff',
+                    borderRadius: '10px',
+                    padding: '2px 6px',
+                    fontSize: '10px',
+                    fontWeight: 600,
+                    minWidth: '18px',
+                    textAlign: 'center'
+                  }}>
+                    {stats.criticalAlerts + stats.warningAlerts}
+                  </span>
+                )}
+              </button>
+            </Tooltip>
+            <Tooltip content="Switch between dark and light theme" position="bottom" isDark={isDark}>
+              <button style={buttonStyle} onClick={() => {
+                setIsDark(!isDark);
+                showInfo(`Switched to ${!isDark ? 'dark' : 'light'} theme`);
+              }}>
+                {isDark ? <Sun size={16} /> : <Moon size={16} />}
+              </button>
+            </Tooltip>
+            {onShowAuditLog && (
+              <Tooltip content="View audit log and activity history" position="bottom" isDark={isDark}>
+                <button style={buttonStyle} onClick={onShowAuditLog}>
+                  <Eye size={16} />
+                </button>
+              </Tooltip>
             )}
+            <Tooltip content="Meraki Management - Configure and manage Meraki devices" position="bottom" isDark={isDark}>
+              <button
+                style={buttonStyle}
+                onClick={() => navigate('/dashboard/meraki')}
+              >
+                <img
+                  src="/icons/meraki/logo.jpg"
+                  alt="Meraki"
+                  style={{ width: '18px', height: '18px', borderRadius: '3px', objectFit: 'cover' }}
+                />
+              </button>
+            </Tooltip>
+            <Tooltip content="Open settings and configuration" position="bottom" isDark={isDark}>
+              <button style={buttonStyle} onClick={() => setShowSettings(true)}>
+                <Settings size={16} />
+              </button>
+            </Tooltip>
+            <Tooltip content="Log out of the dashboard" position="bottom" isDark={isDark}>
+              <button style={buttonStyle} onClick={onLogout}>
+                <LogOut size={16} />
+              </button>
+            </Tooltip>
           </div>
         </div>
+      )}
 
-        <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-          <span style={{ fontSize: '13px', color: theme.textSecondary }}>{user.email}</span>
-          <Tooltip content="View all alerts and notifications" position="bottom" isDark={isDark}>
+      {/* Toolbar */}
+      {!isFocusMode && (
+        <div style={{
+          background: theme.bgSecondary,
+          borderBottom: `1px solid ${theme.border}`,
+          padding: '8px 20px',
+          display: 'flex',
+          gap: '10px',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          flex: '0 0 auto'
+        }}>
+          {/* Search */}
+          <div style={{ flex: '1 1 auto', position: 'relative', minWidth: '400px', maxWidth: '1200px' }}>
+            <Search size={16} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: theme.textMuted }} />
+            <input
+              type="text"
+              placeholder="Search sites, customers, IPs..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              style={{ ...inputStyle, paddingLeft: '32px', height: '34px', fontSize: '13px' }}
+            />
+          </div>
+
+          {/* Card Editor Button */}
+          <Tooltip content="Customize card layout and metrics" position="bottom" isDark={isDark}>
             <button
-              style={{ ...buttonStyle, position: 'relative' }}
-              onClick={() => setShowNotifications(!showNotifications)}
+              onClick={() => setShowCardEditor(true)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '6px 12px',
+                background: theme.card,
+                border: `1px solid ${theme.border}`,
+                borderRadius: '6px',
+                color: theme.text,
+                cursor: 'pointer',
+                fontSize: '13px'
+              }}
             >
-              <Bell size={16} />
-              {stats.criticalAlerts + stats.warningAlerts > 0 && (
+              <Edit2 size={14} />
+              Customize Cards
+            </button>
+          </Tooltip>
+          <div style={{ width: '1px', height: '24px', background: theme.border, margin: '0 8px' }} />
+          {/* View mode */}
+          <div style={{ display: 'flex', background: theme.card, borderRadius: '6px', border: `1px solid ${theme.border}`, padding: '2px' }}>
+            <button
+              onClick={() => setViewMode('table')}
+              style={{
+                padding: '5px 10px',
+                background: viewMode === 'table' ? theme.primary : 'transparent',
+                color: viewMode === 'table' ? '#fff' : theme.text,
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px'
+              }}
+            >
+              <List size={14} />
+              Table
+            </button>
+            <button
+              onClick={() => setViewMode('grid')}
+              style={{
+                padding: '5px 10px',
+                background: viewMode === 'grid' ? theme.primary : 'transparent',
+                color: viewMode === 'grid' ? '#fff' : theme.text,
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px'
+              }}
+            >
+              <Grid size={14} />
+              Grid
+            </button>
+            <button
+              onClick={() => setViewMode('map')}
+              style={{
+                padding: '5px 10px',
+                background: viewMode === 'map' ? theme.primary : 'transparent',
+                color: viewMode === 'map' ? '#fff' : theme.text,
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px'
+              }}
+            >
+              <Map size={14} />
+              Map
+            </button>
+            <button
+              onClick={() => setViewMode('noc')}
+              style={{
+                padding: '5px 10px',
+                background: viewMode === 'noc' ? theme.primary : 'transparent',
+                color: viewMode === 'noc' ? '#fff' : theme.text,
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px'
+              }}
+            >
+              <Activity size={14} />
+              NOC
+            </button>
+          </div>
+
+          <Tooltip content="Toggle full screen focus mode" position="bottom" isDark={isDark}>
+            <button
+              onClick={() => {
+                setIsFocusMode(true);
+                // Automatically switch to grid view if not already
+                if (viewMode !== 'grid' && viewMode !== 'noc') {
+                  setViewMode('grid');
+                }
+              }}
+              style={{ ...buttonStyle }}
+            >
+              <Monitor size={16} />
+              Focus Mode
+            </button>
+          </Tooltip>
+
+          {/* Filters toggle */}
+          <Tooltip content="Show advanced filter options" position="bottom" isDark={isDark}>
+            <button
+              onClick={() => setShowFilters(!showFilters)}
+              style={{
+                ...buttonStyle,
+                background: showFilters ? theme.primary : theme.card,
+                color: showFilters ? '#fff' : theme.text,
+              }}
+            >
+              <Filter size={16} />
+              Filters
+              {(customerFilter !== 'all' || statusFilter !== 'all' || monitoringTypeFilter !== 'all' || alertFilter !== 'all') && (
                 <span style={{
-                  position: 'absolute',
-                  top: '-4px',
-                  right: '-4px',
                   background: theme.danger,
                   color: '#fff',
                   borderRadius: '10px',
                   padding: '2px 6px',
-                  fontSize: '10px',
-                  fontWeight: 600,
-                  minWidth: '18px',
-                  textAlign: 'center'
+                  fontSize: '11px',
+                  fontWeight: 600
                 }}>
-                  {stats.criticalAlerts + stats.warningAlerts}
+                  {[customerFilter !== 'all', statusFilter !== 'all', monitoringTypeFilter !== 'all', alertFilter !== 'all'].filter(Boolean).length}
                 </span>
               )}
             </button>
           </Tooltip>
-          <Tooltip content="Switch between dark and light theme" position="bottom" isDark={isDark}>
-            <button style={buttonStyle} onClick={() => {
-              setIsDark(!isDark);
-              showInfo(`Switched to ${!isDark ? 'dark' : 'light'} theme`);
-            }}>
-              {isDark ? <Sun size={16} /> : <Moon size={16} />}
-            </button>
+
+          {/* Group by */}
+          <Tooltip content="Organize sites by category" position="bottom" isDark={isDark}>
+            <select
+              value={groupBy}
+              onChange={(e) => setGroupBy(e.target.value)}
+              style={{
+                ...inputStyle,
+                width: 'auto',
+                minWidth: '150px',
+                cursor: 'pointer'
+              }}
+            >
+              <option value="none">No Grouping</option>
+              <option value="customer">Group by Customer</option>
+              <option value="status">Group by Status</option>
+              <option value="location">Group by Location</option>
+            </select>
           </Tooltip>
-          {onShowAuditLog && (
-            <Tooltip content="View audit log and activity history" position="bottom" isDark={isDark}>
-              <button style={buttonStyle} onClick={onShowAuditLog}>
-                <Eye size={16} />
+
+          {/* Bulk actions */}
+          {selectedSites.size > 0 && (
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <span style={{ fontSize: '14px', color: theme.textSecondary }}>
+                {selectedSites.size} selected
+              </span>
+              <button style={buttonStyle} onClick={() => setShowBulkActions(!showBulkActions)}>
+                <MoreVertical size={16} />
+                Actions
+              </button>
+            </div>
+          )}
+
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px' }}>
+            <Tooltip content="Refresh all site data" position="left" isDark={isDark}>
+              <button
+                style={{
+                  ...buttonStyle,
+                  opacity: loadingState.sites ? 0.7 : 1,
+                  cursor: loadingState.sites ? 'wait' : 'pointer'
+                }}
+                onClick={() => loadSites(true)}
+                disabled={loadingState.sites}
+              >
+                <RefreshCw size={16} style={{
+                  animation: loadingState.sites ? 'spin 1s linear infinite' : 'none'
+                }} />
               </button>
             </Tooltip>
-          )}
-          <Tooltip content="Meraki Management - Configure and manage Meraki devices" position="bottom" isDark={isDark}>
-            <button
-              style={buttonStyle}
-              onClick={() => navigate('/dashboard/meraki')}
-            >
-              <img
-                src="/icons/meraki/logo.jpg"
-                alt="Meraki"
-                style={{ width: '18px', height: '18px', borderRadius: '3px', objectFit: 'cover' }}
-              />
-            </button>
-          </Tooltip>
-          <Tooltip content="Open settings and configuration" position="bottom" isDark={isDark}>
-            <button style={buttonStyle} onClick={() => setShowSettings(true)}>
-              <Settings size={16} />
-            </button>
-          </Tooltip>
-          <Tooltip content="Log out of the dashboard" position="bottom" isDark={isDark}>
-            <button style={buttonStyle} onClick={onLogout}>
-              <LogOut size={16} />
-            </button>
-          </Tooltip>
-        </div>
-      </div>
-
-      {/* Toolbar */}
-      <div style={{
-        background: theme.bgSecondary,
-        borderBottom: `1px solid ${theme.border}`,
-        padding: '8px 20px',
-        display: 'flex',
-        gap: '10px',
-        alignItems: 'center',
-        flexWrap: 'wrap',
-        flex: '0 0 auto'
-      }}>
-        {/* Search */}
-        <div style={{ flex: '1 1 auto', position: 'relative', minWidth: '400px', maxWidth: '1200px' }}>
-          <Search size={16} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: theme.textMuted }} />
-          <input
-            type="text"
-            placeholder="Search sites, customers, IPs..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            style={{ ...inputStyle, paddingLeft: '32px', height: '34px', fontSize: '13px' }}
-          />
-        </div>
-
-        {/* Card Editor Button */}
-        <Tooltip content="Customize card layout and metrics" position="bottom" isDark={isDark}>
-          <button
-            onClick={() => setShowCardEditor(true)}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              padding: '6px 12px',
-              background: theme.card,
-              border: `1px solid ${theme.border}`,
-              borderRadius: '6px',
-              color: theme.text,
-              cursor: 'pointer',
-              fontSize: '13px'
-            }}
-          >
-            <Edit2 size={14} />
-            Customize Cards
-          </button>
-        </Tooltip>
-        <div style={{ width: '1px', height: '24px', background: theme.border, margin: '0 8px' }} />
-        {/* View mode */}
-        <div style={{ display: 'flex', background: theme.card, borderRadius: '6px', border: `1px solid ${theme.border}`, padding: '2px' }}>
-          <button
-            onClick={() => setViewMode('table')}
-            style={{
-              padding: '5px 10px',
-              background: viewMode === 'table' ? theme.primary : 'transparent',
-              color: viewMode === 'table' ? '#fff' : theme.text,
-              border: 'none',
-              borderRadius: '4px',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '4px'
-            }}
-          >
-            <List size={14} />
-            Table
-          </button>
-          <button
-            onClick={() => setViewMode('grid')}
-            style={{
-              padding: '5px 10px',
-              background: viewMode === 'grid' ? theme.primary : 'transparent',
-              color: viewMode === 'grid' ? '#fff' : theme.text,
-              border: 'none',
-              borderRadius: '4px',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '4px'
-            }}
-          >
-            <Grid size={14} />
-            Grid
-          </button>
-          <button
-            onClick={() => setViewMode('map')}
-            style={{
-              padding: '5px 10px',
-              background: viewMode === 'map' ? theme.primary : 'transparent',
-              color: viewMode === 'map' ? '#fff' : theme.text,
-              border: 'none',
-              borderRadius: '4px',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '4px'
-            }}
-          >
-            <Map size={14} />
-            Map
-          </button>
-          <button
-            onClick={() => setViewMode('noc')}
-            style={{
-              padding: '5px 10px',
-              background: viewMode === 'noc' ? theme.primary : 'transparent',
-              color: viewMode === 'noc' ? '#fff' : theme.text,
-              border: 'none',
-              borderRadius: '4px',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '4px'
-            }}
-          >
-            <Activity size={14} />
-            NOC
-          </button>
-        </div>
-
-        {/* Filters toggle */}
-        <Tooltip content="Show advanced filter options" position="bottom" isDark={isDark}>
-          <button
-            onClick={() => setShowFilters(!showFilters)}
-            style={{
-              ...buttonStyle,
-              background: showFilters ? theme.primary : theme.card,
-              color: showFilters ? '#fff' : theme.text,
-            }}
-          >
-            <Filter size={16} />
-            Filters
-            {(customerFilter !== 'all' || statusFilter !== 'all' || monitoringTypeFilter !== 'all' || alertFilter !== 'all') && (
-              <span style={{
-                background: theme.danger,
-                color: '#fff',
-                borderRadius: '10px',
-                padding: '2px 6px',
-                fontSize: '11px',
-                fontWeight: 600
-              }}>
-                {[customerFilter !== 'all', statusFilter !== 'all', monitoringTypeFilter !== 'all', alertFilter !== 'all'].filter(Boolean).length}
-              </span>
-            )}
-          </button>
-        </Tooltip>
-
-        {/* Group by */}
-        <Tooltip content="Organize sites by category" position="bottom" isDark={isDark}>
-          <select
-            value={groupBy}
-            onChange={(e) => setGroupBy(e.target.value)}
-            style={{
-              ...inputStyle,
-              width: 'auto',
-              minWidth: '150px',
-              cursor: 'pointer'
-            }}
-          >
-            <option value="none">No Grouping</option>
-            <option value="customer">Group by Customer</option>
-            <option value="status">Group by Status</option>
-            <option value="location">Group by Location</option>
-          </select>
-        </Tooltip>
-
-        {/* Bulk actions */}
-        {selectedSites.size > 0 && (
-          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-            <span style={{ fontSize: '14px', color: theme.textSecondary }}>
-              {selectedSites.size} selected
-            </span>
-            <button style={buttonStyle} onClick={() => setShowBulkActions(!showBulkActions)}>
-              <MoreVertical size={16} />
-              Actions
-            </button>
+            <Tooltip content="Add a new site to monitor" position="left" isDark={isDark}>
+              <button style={buttonPrimaryStyle} onClick={() => setShowAddSite(true)}>
+                <Plus size={16} />
+                Add Site
+              </button>
+            </Tooltip>
           </div>
-        )}
-
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px' }}>
-          <Tooltip content="Refresh all site data" position="left" isDark={isDark}>
-            <button
-              style={{
-                ...buttonStyle,
-                opacity: loadingState.sites ? 0.7 : 1,
-                cursor: loadingState.sites ? 'wait' : 'pointer'
-              }}
-              onClick={() => loadSites(true)}
-              disabled={loadingState.sites}
-            >
-              <RefreshCw size={16} style={{
-                animation: loadingState.sites ? 'spin 1s linear infinite' : 'none'
-              }} />
-            </button>
-          </Tooltip>
-          <Tooltip content="Add a new site to monitor" position="left" isDark={isDark}>
-            <button style={buttonPrimaryStyle} onClick={() => setShowAddSite(true)}>
-              <Plus size={16} />
-              Add Site
-            </button>
-          </Tooltip>
         </div>
-      </div>
+      )}
+
+      {/* Focus Mode Exit Button */}
+      {isFocusMode && (
+        <button
+          onClick={() => setIsFocusMode(false)}
+          style={{
+            position: 'fixed',
+            top: '20px',
+            right: '20px',
+            zIndex: 2000,
+            background: theme.card,
+            border: `1px solid ${theme.border}`,
+            borderRadius: '50%',
+            width: '40px',
+            height: '40px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer',
+            boxShadow: `0 4px 12px ${theme.shadow}`,
+            opacity: 0.2,
+            transition: 'opacity 0.2s',
+          }}
+          onMouseEnter={(e) => e.currentTarget.style.opacity = '1'}
+          onMouseLeave={(e) => e.currentTarget.style.opacity = '0.2'}
+          title="Exit Focus Mode"
+        >
+          <LogOut size={20} color={theme.text} />
+        </button>
+      )}
 
       {/* Filters panel */}
       {showFilters && (
@@ -1812,6 +1864,7 @@ const NOCDashboardV2 = ({ user, onLogout, onShowCardShowcase, onShowAuditLog }) 
             theme={theme}
             loadingState={loadingState}
             gridCardLayouts={gridCardLayouts}
+            isFocusMode={isFocusMode}
           />
         )}
 

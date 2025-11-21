@@ -499,9 +499,69 @@ export const GridView = ({
   setCardActiveTabs,
   theme,
   loadingState,
-  gridCardLayouts = {}
+  gridCardLayouts = {},
+  isFocusMode = false
 }) => {
   const [activeDrillDown, setActiveDrillDown] = useState(null);
+
+  // Flatten sites if in focus mode to show a single unified grid
+  const sitesToRender = isFocusMode 
+    ? Object.values(groupedSites).flat() 
+    : null;
+
+  if (isFocusMode) {
+    return (
+      <div style={{
+        display: 'grid',
+        // Auto-fit grid that scales with screen size - larger cards for TV mode
+        gridTemplateColumns: 'repeat(auto-fit, minmax(400px, 1fr))', 
+        gap: '24px',
+        padding: '24px',
+        height: '100%',
+        width: '100%',
+        overflowY: 'auto',
+        background: theme.bg
+      }}>
+        {sitesToRender.map(site => {
+          const siteLayoutData = gridCardLayouts[site.id] || gridCardLayouts['global'];
+          const siteLayout = Array.isArray(siteLayoutData) ? siteLayoutData : (siteLayoutData?.layout || null);
+          const cardConfig = siteLayoutData?.cardConfig || {};
+          
+          // Always use DetailedGridCard for focus mode for now, or NOCCard if configured
+          // Scaling up the card size
+          return (
+            <div key={site.id} style={{ transform: 'scale(1)', transformOrigin: 'top left', height: '100%' }}>
+               {siteLayout && Array.isArray(siteLayout) && siteLayout.length > 0 ? (
+                  <NOCCard
+                    site={site}
+                    metrics={metricsData[site.id]}
+                    history={metricsHistory[site.id]}
+                    alerts={alerts.filter(a => a.siteId === site.id && !acknowledgedAlerts.has(a.id))}
+                    isSelected={selectedSites.has(site.id)}
+                    onClick={(s) => setActiveDrillDown(s)}
+                    layout={siteLayout}
+                    theme={theme}
+                    cardConfig={cardConfig}
+                  />
+               ) : (
+                  <DetailedGridCard
+                    site={site}
+                    metrics={metricsData[site.id]}
+                    history={metricsHistory[site.id]}
+                    snmp={snmpData[site.id]}
+                    api={apiData[site.id]}
+                    alerts={alerts.filter(a => a.siteId === site.id && !acknowledgedAlerts.has(a.id))}
+                    isSelected={selectedSites.has(site.id)}
+                    onClick={(s) => setActiveDrillDown(s)}
+                    theme={theme}
+                  />
+               )}
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
 
   return (
     <>

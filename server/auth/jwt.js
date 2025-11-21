@@ -3,7 +3,7 @@ const crypto = require('crypto');
 
 const JWT_ACCESS_SECRET = process.env.JWT_ACCESS_SECRET;
 const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET;
-const JWT_ACCESS_EXPIRY = process.env.JWT_ACCESS_EXPIRY || '15m';
+const JWT_ACCESS_EXPIRY = process.env.JWT_ACCESS_EXPIRY || '24h';
 const JWT_REFRESH_EXPIRY = process.env.JWT_REFRESH_EXPIRY || '7d';
 
 // Validate JWT secrets are set
@@ -14,7 +14,7 @@ if (!JWT_ACCESS_SECRET || !JWT_REFRESH_SECRET) {
 }
 
 /**
- * Generate access token (short-lived, 15 minutes)
+ * Generate access token (24 hours expiry)
  */
 function generateAccessToken(payload) {
   return jwt.sign(payload, JWT_ACCESS_SECRET, { expiresIn: JWT_ACCESS_EXPIRY });

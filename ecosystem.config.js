@@ -1,15 +1,23 @@
 // PM2 Configuration for Production
+require('dotenv').config();
+
 module.exports = {
   apps: [{
-    name: 'nocturnal',
+    name: 'covenant-noc',
     script: './server/index.js',
     instances: 1,
     autorestart: true,
     watch: false,
     max_memory_restart: '1G',
+    env_file: '.env',
     env: {
       NODE_ENV: 'production',
-      PORT: 3000
+      PORT: process.env.PORT || 3000,
+      DATABASE_URL: process.env.DATABASE_URL,
+      JWT_ACCESS_SECRET: process.env.JWT_ACCESS_SECRET,
+      JWT_REFRESH_SECRET: process.env.JWT_REFRESH_SECRET,
+      SESSION_SECRET: process.env.SESSION_SECRET,
+      CLIENT_URL: process.env.CLIENT_URL
     },
     error_file: './logs/err.log',
     out_file: './logs/out.log',

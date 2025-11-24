@@ -285,26 +285,43 @@ async function runAutomaticCleanup() {
  * Middleware to check storage limits before operations
  */
 async function checkBeforeCreate(model, estimatedBytes) {
-  const check = await checkStorageLimit(estimatedBytes);
-  
-  if (!check.allowed) {
-    // Try cleanup first
-    console.log(`[Limits] Storage limit check failed, attempting cleanup...`);
-    await aggressiveCleanup();
+  try {
+    const check = await checkStorageLimit(estimatedBytes);
     
-    // Check again after cleanup
-    const recheck = await checkStorageLimit(estimatedBytes);
-    if (!recheck.allowed) {
-      throw new Error(`Storage limit exceeded: ${recheck.reason}. Please delete old data or upgrade your plan.`);
+    // If we couldn't estimate storage (database connection issue), allow the operation
+    // but log a warning
+    if (!check.allowed && check.reason === 'Could not estimate storage') {
+      console.warn(`[Limits] Could not check storage limits (database connection issue), allowing operation`);
+      return true;
     }
-  }
+    
+    if (!check.allowed) {
+      // Try cleanup first
+      console.log(`[Limits] Storage limit check failed, attempting cleanup...`);
+      await aggressiveCleanup();
+      
+      // Check again after cleanup
+      const recheck = await checkStorageLimit(estimatedBytes);
+      if (!recheck.allowed && recheck.reason !== 'Could not estimate storage') {
+        throw new Error(`Storage limit exceeded: ${recheck.reason}. Please delete old data or upgrade your plan.`);
+      }
+    }
 
-  // Warn if approaching limit
-  if (check.currentUsage.isNearLimit) {
-    console.warn(`[Limits] WARNING: Storage at ${check.currentUsage.percentage.toFixed(1)}% - consider cleanup`);
-  }
+    // Warn if approaching limit (only if we have usage data)
+    if (check.currentUsage && check.currentUsage.isNearLimit) {
+      console.warn(`[Limits] WARNING: Storage at ${check.currentUsage.percentage.toFixed(1)}% - consider cleanup`);
+    }
 
-  return true;
+    return true;
+  } catch (error) {
+    // If it's a database connection error, allow the operation
+    if (isQuotaExceededError(error) || error?.code === 'P1001') {
+      console.warn(`[Limits] Database connection error during limit check, allowing operation:`, error.message);
+      return true;
+    }
+    // Re-throw other errors
+    throw error;
+  }
 }
 
 /**

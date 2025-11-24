@@ -164,9 +164,15 @@ const NOCDashboardV2 = ({ user, onLogout, onShowCardShowcase, onShowAuditLog }) 
   // Theme
   const [isDark, setIsDark] = useState(() => localStorage.getItem('noc-theme') === 'dark');
 
-  // View state
-  const [viewMode, setViewMode] = useState('grid'); // table, grid, map - default to grid
-  const [isFocusMode, setIsFocusMode] = useState(false); // Full screen focus mode
+  // View state - restore from sessionStorage if page was auto-refreshed
+  const [viewMode, setViewMode] = useState(() => {
+    const saved = sessionStorage.getItem('noc-view-mode');
+    return saved || 'grid';
+  });
+  const [isFocusMode, setIsFocusMode] = useState(() => {
+    const saved = sessionStorage.getItem('noc-focus-mode');
+    return saved === 'true';
+  });
   const [sites, setSites] = useState([]);
   const [metricsData, setMetricsData] = useState({});
   const [snmpData, setSnmpData] = useState({});
@@ -193,6 +199,16 @@ const NOCDashboardV2 = ({ user, onLogout, onShowCardShowcase, onShowAuditLog }) 
     api: {},
     history: {},
     extendedHistory: {}
+  });
+
+  // Auto-refresh state
+  const [pageRefreshEnabled, setPageRefreshEnabled] = useState(() => {
+    const saved = localStorage.getItem('noc-page-refresh-enabled');
+    return saved === null ? true : saved === 'true';
+  });
+  const [pageRefreshInterval, setPageRefreshInterval] = useState(() => {
+    const saved = localStorage.getItem('noc-page-refresh-interval');
+    return saved ? parseInt(saved) : 10; // Default 10 minutes
   });
 
   const setLoadingFlag = useCallback((category, key, value) => {
@@ -732,6 +748,96 @@ const NOCDashboardV2 = ({ user, onLogout, onShowCardShowcase, onShowAuditLog }) 
 
     return () => clearInterval(interval);
   }, [sites, refreshInterval, user]);
+
+  // Auto page refresh for 24/7 NOC displays (preserves view state)
+  useEffect(() => {
+    if (!pageRefreshEnabled) return;
+
+    const refreshIntervalMs = pageRefreshInterval * 60 * 1000; // Convert minutes to ms
+
+    const interval = setInterval(() => {
+      console.log('[Auto-Refresh] Refreshing page to prevent memory leaks (preserving state)...');
+      
+      // Save current view state to sessionStorage before refresh
+      sessionStorage.setItem('noc-view-mode', viewMode);
+      sessionStorage.setItem('noc-focus-mode', isFocusMode.toString());
+      sessionStorage.setItem('noc-search-term', searchTerm);
+      sessionStorage.setItem('noc-filters', JSON.stringify({
+        customer: customerFilter,
+        status: statusFilter,
+        monitoring: monitoringFilter,
+        alert: alertFilter,
+        groupBy: groupBy
+      }));
+      sessionStorage.setItem('noc-selected-sites', JSON.stringify(Array.from(selectedSites)));
+      sessionStorage.setItem('noc-expanded-groups', JSON.stringify(Array.from(expandedGroups)));
+      sessionStorage.setItem('noc-auto-refreshed', 'true');
+      sessionStorage.setItem('noc-refresh-timestamp', Date.now().toString());
+      
+      // Perform the refresh
+      window.location.reload();
+    }, refreshIntervalMs);
+
+    return () => clearInterval(interval);
+  }, [pageRefreshEnabled, pageRefreshInterval, viewMode, isFocusMode, searchTerm, customerFilter, statusFilter, monitoringFilter, alertFilter, groupBy, selectedSites, expandedGroups]);
+
+  // Restore view state after auto-refresh
+  useEffect(() => {
+    const wasAutoRefreshed = sessionStorage.getItem('noc-auto-refreshed');
+    if (wasAutoRefreshed === 'true') {
+      console.log('[Auto-Refresh] Restoring view state after refresh...');
+      
+      // Restore filters
+      const savedFilters = sessionStorage.getItem('noc-filters');
+      if (savedFilters) {
+        try {
+          const filters = JSON.parse(savedFilters);
+          setCustomerFilter(filters.customer || 'all');
+          setStatusFilter(filters.status || 'all');
+          setMonitoringFilter(filters.monitoring || 'all');
+          setAlertFilter(filters.alert || 'all');
+          setGroupBy(filters.groupBy || 'none');
+        } catch (e) {
+          console.error('Failed to restore filters:', e);
+        }
+      }
+      
+      // Restore search term
+      const savedSearch = sessionStorage.getItem('noc-search-term');
+      if (savedSearch) setSearchTerm(savedSearch);
+      
+      // Restore selected sites
+      const savedSelected = sessionStorage.getItem('noc-selected-sites');
+      if (savedSelected) {
+        try {
+          const selected = JSON.parse(savedSelected);
+          setSelectedSites(new Set(selected));
+        } catch (e) {
+          console.error('Failed to restore selected sites:', e);
+        }
+      }
+      
+      // Restore expanded groups
+      const savedExpanded = sessionStorage.getItem('noc-expanded-groups');
+      if (savedExpanded) {
+        try {
+          const expanded = JSON.parse(savedExpanded);
+          setExpandedGroups(new Set(expanded));
+        } catch (e) {
+          console.error('Failed to restore expanded groups:', e);
+        }
+      }
+      
+      // Clear the flag
+      sessionStorage.removeItem('noc-auto-refreshed');
+      
+      const refreshTime = sessionStorage.getItem('noc-refresh-timestamp');
+      if (refreshTime) {
+        const elapsed = Math.round((Date.now() - parseInt(refreshTime)) / 1000);
+        console.log(`[Auto-Refresh] State restored (refresh took ${elapsed}s)`);
+      }
+    }
+  }, []);
 
   // Refresh monitoring data for currently selected site (when viewing detail modal)
   useEffect(() => {
@@ -2050,6 +2156,14 @@ const NOCDashboardV2 = ({ user, onLogout, onShowCardShowcase, onShowAuditLog }) 
           onSitesImported={loadSites}
           refreshInterval={refreshInterval}
           onRefreshIntervalChange={updateRefreshInterval}
+          pageRefreshEnabled={pageRefreshEnabled}
+          pageRefreshInterval={pageRefreshInterval}
+          onPageRefreshChange={(enabled, interval) => {
+            setPageRefreshEnabled(enabled);
+            setPageRefreshInterval(interval);
+            localStorage.setItem('noc-page-refresh-enabled', enabled.toString());
+            localStorage.setItem('noc-page-refresh-interval', interval.toString());
+          }}
         />
       )}
 

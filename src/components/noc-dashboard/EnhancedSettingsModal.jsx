@@ -63,7 +63,10 @@ const EnhancedSettingsModal = ({
   onDeleteAllSites, 
   onSitesImported, 
   refreshInterval, 
-  onRefreshIntervalChange 
+  onRefreshIntervalChange,
+  pageRefreshEnabled,
+  pageRefreshInterval,
+  onPageRefreshChange
 }) => {
   const [activeTab, setActiveTab] = useState('general');
   const [searchQuery, setSearchQuery] = useState('');
@@ -679,12 +682,12 @@ const EnhancedSettingsModal = ({
                       <Toggle 
                         checked={autoRefresh}
                         onChange={setAutoRefresh}
-                        label="Enable automatic refresh"
+                        label="Enable automatic data refresh"
                       />
                       {autoRefresh && (
                         <div>
                           <label style={{ display: 'block', marginBottom: '8px', color: theme.textSecondary, fontSize: '13px', fontWeight: 500 }}>
-                            Refresh Interval
+                            Data Refresh Interval
                           </label>
                           <select
                             value={refreshInterval}
@@ -706,6 +709,70 @@ const EnhancedSettingsModal = ({
                             <option value="60000">1 Minute</option>
                             <option value="300000">5 Minutes</option>
                           </select>
+                        </div>
+                      )}
+                    </div>
+                  </SettingCard>
+
+                  <SettingCard
+                    icon={<Monitor />}
+                    title="Page Auto-Refresh (24/7 NOC Mode)"
+                    description="Automatically refresh the entire page to prevent memory leaks during extended monitoring sessions. Preserves your current view, filters, and focus mode."
+                  >
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                      <Toggle 
+                        checked={pageRefreshEnabled}
+                        onChange={(checked) => {
+                          if (onPageRefreshChange) {
+                            onPageRefreshChange(checked, pageRefreshInterval);
+                          }
+                        }}
+                        label="Enable automatic page refresh"
+                      />
+                      {pageRefreshEnabled && (
+                        <div>
+                          <label style={{ display: 'block', marginBottom: '8px', color: theme.textSecondary, fontSize: '13px', fontWeight: 500 }}>
+                            Page Refresh Interval
+                          </label>
+                          <select
+                            value={pageRefreshInterval}
+                            onChange={(e) => {
+                              const newInterval = Number(e.target.value);
+                              if (onPageRefreshChange) {
+                                onPageRefreshChange(pageRefreshEnabled, newInterval);
+                              }
+                            }}
+                            style={{
+                              width: '100%',
+                              padding: '12px',
+                              borderRadius: '8px',
+                              border: `1px solid ${theme.border}`,
+                              background: theme.bg,
+                              color: theme.text,
+                              fontSize: '14px',
+                              cursor: 'pointer'
+                            }}
+                          >
+                            <option value="5">5 Minutes</option>
+                            <option value="10">10 Minutes (Recommended)</option>
+                            <option value="15">15 Minutes</option>
+                            <option value="30">30 Minutes</option>
+                            <option value="60">1 Hour</option>
+                          </select>
+                          <div style={{ 
+                            marginTop: '12px', 
+                            padding: '12px', 
+                            background: theme.bgSecondary, 
+                            borderRadius: '8px',
+                            border: `1px solid ${theme.border}`
+                          }}>
+                            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
+                              <Info size={16} color={theme.primary} style={{ marginTop: '2px', flexShrink: 0 }} />
+                              <div style={{ fontSize: '12px', color: theme.textSecondary, lineHeight: '1.5' }}>
+                                The page will automatically refresh every {pageRefreshInterval} minutes to prevent memory buildup during extended monitoring. Your current view mode, filters, focus mode, and fullscreen state will be preserved.
+                              </div>
+                            </div>
+                          </div>
                         </div>
                       )}
                     </div>

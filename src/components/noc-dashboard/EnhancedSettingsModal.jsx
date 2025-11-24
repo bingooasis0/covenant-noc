@@ -93,7 +93,7 @@ const EnhancedSettingsModal = ({
   // Users State
   const [users, setUsers] = useState([]);
   const [usersLoading, setUsersLoading] = useState(false);
-  const [newUserData, setNewUserData] = useState({ username: '', email: '', role: 'viewer', password: '', firstName: '', lastName: '' });
+  const [newUserData, setNewUserData] = useState({ email: '', password: '', firstName: '', lastName: '', role: 'viewer' });
   const [showDeleteUserConfirm, setShowDeleteUserConfirm] = useState(null);
 
   // Notification State
@@ -289,7 +289,7 @@ const EnhancedSettingsModal = ({
       });
       if (res.ok) {
         showSuccess('User created successfully');
-        setNewUserData({ username: '', email: '', role: 'viewer', password: '', firstName: '', lastName: '' });
+        setNewUserData({ email: '', password: '', firstName: '', lastName: '', role: 'viewer' });
         fetchUsers();
       } else {
         const err = await res.json();

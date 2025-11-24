@@ -316,31 +316,37 @@ const CardEditorModal = ({ isOpen, onClose, theme, onSave: onSaveCallback }) => 
                         </button>
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                        {TEMPLATES.map(template => (
-                            <div 
-                                key={template.id}
-                                onClick={() => applyTemplate(template)}
-                                style={{
-                                    padding: '12px',
-                                    border: `1px solid ${theme.border}`,
-                                    borderRadius: '8px',
-                                    background: theme.card,
-                                    cursor: 'pointer',
-                                    transition: 'border-color 0.2s'
-                                }}
-                                onMouseEnter={(e) => {
-                                    e.currentTarget.style.borderColor = theme.primary;
-                                    setHoveredTemplate(template);
-                                }}
-                                onMouseLeave={(e) => {
-                                    e.currentTarget.style.borderColor = theme.border;
-                                    setHoveredTemplate(null);
-                                }}
-                            >
-                                <div style={{ fontWeight: 600, color: theme.text, marginBottom: '4px' }}>{template.label}</div>
-                                <div style={{ fontSize: '12px', color: theme.textSecondary }}>{template.description}</div>
+                        {TEMPLATES && TEMPLATES.length > 0 ? (
+                            TEMPLATES.map(template => (
+                                <div 
+                                    key={template.id || template.label}
+                                    onClick={() => applyTemplate(template)}
+                                    style={{
+                                        padding: '12px',
+                                        border: `1px solid ${theme.border}`,
+                                        borderRadius: '8px',
+                                        background: theme.card,
+                                        cursor: 'pointer',
+                                        transition: 'border-color 0.2s'
+                                    }}
+                                    onMouseEnter={(e) => {
+                                        e.currentTarget.style.borderColor = theme.primary;
+                                        setHoveredTemplate(template);
+                                    }}
+                                    onMouseLeave={(e) => {
+                                        e.currentTarget.style.borderColor = theme.border;
+                                        setHoveredTemplate(null);
+                                    }}
+                                >
+                                    <div style={{ fontWeight: 600, color: theme.text, marginBottom: '4px' }}>{template.label}</div>
+                                    <div style={{ fontSize: '12px', color: theme.textSecondary }}>{template.description}</div>
+                                </div>
+                            ))
+                        ) : (
+                            <div style={{ gridColumn: '1 / -1', padding: '20px', textAlign: 'center', color: theme.textSecondary }}>
+                                No templates available. Please check the Templates.js file.
                             </div>
-                        ))}
+                        )}
                     </div>
                 </div>
             )}

@@ -550,6 +550,7 @@ export const GridView = ({
                     history={metricsHistory[site.id]}
                     snmp={snmpData[site.id]}
                     api={apiData[site.id]}
+                    onEditSite={setEditingSite}
                     alerts={alerts.filter(a => a.siteId === site.id && !acknowledgedAlerts.has(a.id))}
                     isSelected={selectedSites.has(site.id)}
                     onClick={(s) => setActiveDrillDown(s)}
@@ -671,6 +672,7 @@ export const GridView = ({
                       metrics={metricsData[site.id]}
                       history={metricsHistory[site.id]}
                       snmp={snmpData[site.id]}
+                      onEditSite={setEditingSite}
                       api={apiData[site.id]}
                       alerts={alerts.filter(a => a.siteId === site.id && !acknowledgedAlerts.has(a.id))}
                       isSelected={selectedSites.has(site.id)}

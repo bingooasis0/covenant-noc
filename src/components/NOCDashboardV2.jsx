@@ -30,7 +30,8 @@ import {
   mergeTelemetryState
 } from './noc-dashboard/utils';
 import { TableView, GridView, NOCView, MapView } from './noc-dashboard/views';
-import { SiteDetailModal, AddEditSiteModal, SettingsModal, ConfirmModal } from './noc-dashboard/modals';
+import { SiteDetailModal, AddEditSiteModal, ConfirmModal } from './noc-dashboard/modals';
+import EnhancedSettingsModal from './noc-dashboard/EnhancedSettingsModal';
 import CardEditorModal from './card-editor/CardEditorModal';
 import { authFetch } from '../utils/api';
 import Tooltip from './Tooltip';
@@ -2036,7 +2037,7 @@ const NOCDashboardV2 = ({ user, onLogout, onShowCardShowcase, onShowAuditLog }) 
 
       {/* Settings modal */}
       {showSettings && (
-        <SettingsModal
+        <EnhancedSettingsModal
           isOpen={showSettings}
           onClose={() => setShowSettings(false)}
           theme={theme}

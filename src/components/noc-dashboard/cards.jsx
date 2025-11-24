@@ -3,7 +3,7 @@ import { AreaChart, Area, XAxis, YAxis, ResponsiveContainer, Tooltip } from 'rec
 import {
   Activity, Wifi, AlertTriangle, Server, Zap, Clock,
   ChevronRight, MapPin, Globe, RefreshCw, Shield,
-  CheckCircle, XCircle, AlertCircle
+  CheckCircle, XCircle, AlertCircle, Settings
 } from 'lucide-react';
 
 // Obsidian/Neon Theme Constants
@@ -26,7 +26,7 @@ const getStatusText = (metrics) => {
 };
 
 // --- Detailed Grid Card (The "Screenshot" Look) ---
-export const DetailedGridCard = ({ site, metrics, history, snmp, api, alerts, onClick, isSelected, theme = {} }) => {
+export const DetailedGridCard = ({ site, metrics, history, snmp, api, alerts, onClick, isSelected, theme = {}, onEditSite }) => {
   const statusColor = getStatusColor(metrics, theme);
   const statusText = getStatusText(metrics);
 
@@ -74,14 +74,59 @@ export const DetailedGridCard = ({ site, metrics, history, snmp, api, alerts, on
           e.currentTarget.style.borderColor = theme.borderLight;
           e.currentTarget.style.transform = 'translateY(-2px)';
         }
+        // Show settings button on hover
+        const settingsBtn = e.currentTarget.querySelector('.card-settings-btn');
+        if (settingsBtn) settingsBtn.style.opacity = '1';
       }}
       onMouseLeave={(e) => {
         if (!isSelected) {
           e.currentTarget.style.borderColor = theme.border;
           e.currentTarget.style.transform = 'none';
         }
+        // Hide settings button
+        const settingsBtn = e.currentTarget.querySelector('.card-settings-btn');
+        if (settingsBtn) settingsBtn.style.opacity = '0';
       }}
     >
+      {/* Settings Gear Icon */}
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          if (onEditSite) onEditSite(site);
+        }}
+        style={{
+          position: 'absolute',
+          top: '12px',
+          right: '12px',
+          width: '32px',
+          height: '32px',
+          borderRadius: '8px',
+          background: theme.bgSecondary,
+          border: `1px solid ${theme.border}`,
+          color: theme.textSecondary,
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          opacity: 0,
+          transition: 'all 0.2s',
+          zIndex: 10
+        }}
+        className="card-settings-btn"
+        onMouseEnter={(e) => {
+          e.currentTarget.style.background = theme.primary + '15';
+          e.currentTarget.style.borderColor = theme.primary;
+          e.currentTarget.style.color = theme.primary;
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.background = theme.bgSecondary;
+          e.currentTarget.style.borderColor = theme.border;
+          e.currentTarget.style.color = theme.textSecondary;
+        }}
+      >
+        <Settings size={16} />
+      </button>
+
       {/* Header Section */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div>

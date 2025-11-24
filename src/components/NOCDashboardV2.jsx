@@ -765,7 +765,7 @@ const NOCDashboardV2 = ({ user, onLogout, onShowCardShowcase, onShowAuditLog }) 
       sessionStorage.setItem('noc-filters', JSON.stringify({
         customer: customerFilter,
         status: statusFilter,
-        monitoring: monitoringFilter,
+        monitoring: monitoringTypeFilter,
         alert: alertFilter,
         groupBy: groupBy
       }));
@@ -779,7 +779,7 @@ const NOCDashboardV2 = ({ user, onLogout, onShowCardShowcase, onShowAuditLog }) 
     }, refreshIntervalMs);
 
     return () => clearInterval(interval);
-  }, [pageRefreshEnabled, pageRefreshInterval, viewMode, isFocusMode, searchTerm, customerFilter, statusFilter, monitoringFilter, alertFilter, groupBy, selectedSites, expandedGroups]);
+  }, [pageRefreshEnabled, pageRefreshInterval, viewMode, isFocusMode, searchTerm, customerFilter, statusFilter, monitoringTypeFilter, alertFilter, groupBy, selectedSites, expandedGroups]);
 
   // Restore view state after auto-refresh
   useEffect(() => {
@@ -794,7 +794,7 @@ const NOCDashboardV2 = ({ user, onLogout, onShowCardShowcase, onShowAuditLog }) 
           const filters = JSON.parse(savedFilters);
           setCustomerFilter(filters.customer || 'all');
           setStatusFilter(filters.status || 'all');
-          setMonitoringFilter(filters.monitoring || 'all');
+          setMonitoringTypeFilter(filters.monitoring || 'all');
           setAlertFilter(filters.alert || 'all');
           setGroupBy(filters.groupBy || 'none');
         } catch (e) {

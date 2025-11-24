@@ -316,7 +316,7 @@ const CardEditorModal = ({ isOpen, onClose, theme, onSave: onSaveCallback }) => 
                         </button>
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                        {TEMPLATES && TEMPLATES.length > 0 ? (
+                        {TEMPLATES && Array.isArray(TEMPLATES) && TEMPLATES.length > 0 ? (
                             TEMPLATES.map(template => (
                                 <div 
                                     key={template.id || template.label}
@@ -344,7 +344,8 @@ const CardEditorModal = ({ isOpen, onClose, theme, onSave: onSaveCallback }) => 
                             ))
                         ) : (
                             <div style={{ gridColumn: '1 / -1', padding: '20px', textAlign: 'center', color: theme.textSecondary }}>
-                                No templates available. Please check the Templates.js file.
+                                {console.error('Templates not loaded:', { TEMPLATES, type: typeof TEMPLATES, isArray: Array.isArray(TEMPLATES) })}
+                                No templates available. TEMPLATES: {TEMPLATES ? 'exists' : 'undefined'}, Length: {TEMPLATES?.length || 0}
                             </div>
                         )}
                     </div>

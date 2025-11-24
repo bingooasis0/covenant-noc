@@ -56,23 +56,16 @@ export async function authFetch(url, options = {}) {
             ...options,
             headers: newHeaders
           });
-        } else {
-          // Refresh failed, clear tokens and redirect to login
-          localStorage.removeItem('accessToken');
-          localStorage.removeItem('refreshToken');
-          window.location.href = '/login';
         }
+        // If refresh fails, just return the original 401 response
+        // Don't automatically logout or redirect
       } catch (error) {
-        // Refresh request failed, clear tokens and redirect to login
-        localStorage.removeItem('accessToken');
-        localStorage.removeItem('refreshToken');
-        window.location.href = '/login';
+        // If refresh request fails, just return the original 401 response
+        // Don't automatically logout or redirect
       }
-    } else {
-      // No refresh token available, redirect to login
-      localStorage.removeItem('accessToken');
-      window.location.href = '/login';
     }
+    // If no refresh token, just return the original 401 response
+    // Don't automatically logout or redirect
   }
 
   return response;

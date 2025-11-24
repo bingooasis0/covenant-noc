@@ -4,8 +4,17 @@ const prisma = require('../prisma');
 const { generateTokenPair, verifyRefreshToken } = require('./jwt');
 const { requireAuth } = require('./middleware');
 const limits = require('../limits');
+const cache = require('../cache');
 
 const router = express.Router();
+
+// Helper to detect quota exceeded errors
+function isQuotaExceededError(error) {
+  return error?.message?.includes('exceeded the data transfer quota') ||
+         error?.message?.includes('data transfer quota') ||
+         error?.code === 'P1001' ||
+         (error?.meta?.code === '53300' && error?.meta?.message?.includes('quota'));
+}
 
 /**
  * POST /auth/register
@@ -20,10 +29,12 @@ router.post('/register', async (req, res) => {
       return res.status(400).json({ error: 'Email and password are required' });
     }
 
-    // Check if user already exists
-    const existingUser = await prisma.user.findUnique({
-      where: { email }
-    });
+    // Check if user already exists (cached)
+    const existingUser = await cache.getOrSet(
+      cache.CACHE_KEYS.USER_BY_EMAIL + email,
+      cache.TTL.USER,
+      () => prisma.user.findUnique({ where: { email } })
+    );
 
     if (existingUser) {
       return res.status(400).json({ error: 'User already exists' });
@@ -45,6 +56,9 @@ router.post('/register', async (req, res) => {
         role: 'user'
       }
     });
+
+    // Invalidate user cache
+    cache.invalidateUser(user.id, user.email);
 
     // Generate tokens
     const { accessToken, refreshToken } = generateTokenPair(user);
@@ -85,6 +99,16 @@ router.post('/register', async (req, res) => {
 
   } catch (error) {
     console.error('Register error:', error);
+    
+    // Check if it's a quota exceeded error
+    if (isQuotaExceededError(error)) {
+      return res.status(503).json({ 
+        error: 'Database quota exceeded',
+        message: 'Your Neon database has exceeded its monthly data transfer quota (5 GB). Please upgrade your plan or wait for the quota to reset.',
+        code: 'QUOTA_EXCEEDED'
+      });
+    }
+    
     res.status(500).json({ error: 'Registration failed' });
   }
 });
@@ -102,10 +126,12 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ error: 'Email and password are required' });
     }
 
-    // Find user
-    const user = await prisma.user.findUnique({
-      where: { email }
-    });
+    // Find user (cached)
+    const user = await cache.getOrSet(
+      cache.CACHE_KEYS.USER_BY_EMAIL + email,
+      cache.TTL.USER,
+      () => prisma.user.findUnique({ where: { email } })
+    );
 
     if (!user) {
       return res.status(401).json({ error: 'Invalid credentials' });
@@ -125,6 +151,9 @@ router.post('/login', async (req, res) => {
     await prisma.refreshToken.deleteMany({
       where: { userId: user.id }
     });
+
+    // Invalidate user cache after login
+    cache.invalidateUser(user.id, user.email);
 
     // Store refresh token in database
     const expiresAt = new Date();
@@ -162,6 +191,16 @@ router.post('/login', async (req, res) => {
 
   } catch (error) {
     console.error('Login error:', error);
+    
+    // Check if it's a quota exceeded error
+    if (isQuotaExceededError(error)) {
+      return res.status(503).json({ 
+        error: 'Database quota exceeded',
+        message: 'Your Neon database has exceeded its monthly data transfer quota (5 GB). Please upgrade your plan or wait for the quota to reset. The quota resets monthly.',
+        code: 'QUOTA_EXCEEDED'
+      });
+    }
+    
     res.status(500).json({ error: 'Login failed' });
   }
 });
@@ -185,11 +224,15 @@ router.post('/refresh', async (req, res) => {
       return res.status(401).json({ error: 'Invalid refresh token' });
     }
 
-    // Check if token exists in database and not expired
-    const tokenRecord = await prisma.refreshToken.findUnique({
+    // Check if token exists in database and not expired (cached)
+    const tokenRecord = await cache.getOrSet(
+      cache.CACHE_KEYS.REFRESH_TOKEN + refreshToken,
+      cache.TTL.REFRESH_TOKEN,
+      () => prisma.refreshToken.findUnique({
       where: { token: refreshToken },
       include: { user: true }
-    });
+      })
+    );
 
     if (!tokenRecord || tokenRecord.expiresAt < new Date()) {
       return res.status(401).json({ error: 'Refresh token expired or invalid' });
@@ -202,6 +245,9 @@ router.post('/refresh', async (req, res) => {
     await prisma.refreshToken.delete({
       where: { token: refreshToken }
     });
+
+    // Invalidate token cache
+    cache.invalidateRefreshToken(refreshToken);
 
     // Store new refresh token
     const expiresAt = new Date();
@@ -225,6 +271,16 @@ router.post('/refresh', async (req, res) => {
 
   } catch (error) {
     console.error('Refresh error:', error);
+    
+    // Check if it's a quota exceeded error
+    if (isQuotaExceededError(error)) {
+      return res.status(503).json({ 
+        error: 'Database quota exceeded',
+        message: 'Your Neon database has exceeded its monthly data transfer quota (5 GB). Please upgrade your plan or wait for the quota to reset.',
+        code: 'QUOTA_EXCEEDED'
+      });
+    }
+    
     res.status(500).json({ error: 'Token refresh failed' });
   }
 });
@@ -268,7 +324,11 @@ router.post('/logout', requireAuth, async (req, res) => {
  */
 router.get('/me', requireAuth, async (req, res) => {
   try {
-    const user = await prisma.user.findUnique({
+    // Get user (cached)
+    const user = await cache.getOrSet(
+      cache.CACHE_KEYS.USER + req.user.userId,
+      cache.TTL.USER,
+      () => prisma.user.findUnique({
       where: { id: req.user.userId },
       select: {
         id: true,
@@ -279,7 +339,8 @@ router.get('/me', requireAuth, async (req, res) => {
         createdAt: true,
         updatedAt: true
       }
-    });
+      })
+    );
 
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
@@ -289,6 +350,16 @@ router.get('/me', requireAuth, async (req, res) => {
 
   } catch (error) {
     console.error('Get user error:', error);
+    
+    // Check if it's a quota exceeded error
+    if (isQuotaExceededError(error)) {
+      return res.status(503).json({ 
+        error: 'Database quota exceeded',
+        message: 'Your Neon database has exceeded its monthly data transfer quota (5 GB). Please upgrade your plan or wait for the quota to reset.',
+        code: 'QUOTA_EXCEEDED'
+      });
+    }
+    
     res.status(500).json({ error: 'Failed to get user' });
   }
 });

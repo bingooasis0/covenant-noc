@@ -45,6 +45,8 @@ import {
   notifyAlertAcknowledged
 } from '../services/toast';
 
+import { io } from 'socket.io-client';
+
 const FILTER_COOKIE_KEY = 'noc-filters';
 const FILTER_LOCAL_STORAGE_KEY = 'noc-filters';
 const FILTER_COOKIE_MAX_AGE = 60 * 60 * 24 * 30; // 30 days
@@ -379,21 +381,31 @@ const NOCDashboardV2 = ({ user, onLogout, onShowCardShowcase, onShowAuditLog }) 
           const siteLayouts = {};
           await Promise.all(sites.map(async (site) => {
             try {
-              const siteRes = await authFetch(`/api/card-config?viewType=grid&scope=site&targetId=${site.id}`);
+              const url = `/api/card-config?viewType=grid&scope=site&targetId=${site.id}`;
+              // console.log(`Fetching config for ${site.name}:`, url);
+              const siteRes = await authFetch(url);
               if (siteRes.ok) {
                 const siteData = await siteRes.json();
+                console.log(`[Load] Config for ${site.name}:`, siteData);
                 if (siteData && siteData.layout) {
                   // Support both old format (just layout array) and new format (object with layout and cardConfig)
                   const layoutData = Array.isArray(siteData.layout)
                     ? { layout: siteData.layout, cardConfig: siteData.cardConfig || {} }
                     : siteData.layout;
+                  console.log(`[Load] Parsed layout for ${site.name}:`, layoutData);
                   siteLayouts[site.id] = layoutData;
+                } else {
+                  console.log(`[Load] No layout found for ${site.name}, response:`, siteData);
                 }
+              } else {
+                console.log(`[Load] Failed to fetch config for ${site.name}, status:`, siteRes.status);
               }
             } catch (err) {
               // Ignore individual site errors
+              console.error(`Error fetching config for ${site.id}:`, err);
             }
           }));
+          // console.log('Site layouts loaded:', Object.keys(siteLayouts));
           if (Object.keys(siteLayouts).length > 0) {
             setGridCardLayouts(prev => ({ ...prev, ...siteLayouts }));
           }
@@ -447,18 +459,32 @@ const NOCDashboardV2 = ({ user, onLogout, onShowCardShowcase, onShowAuditLog }) 
               const siteRes = await authFetch(`/api/card-config?viewType=grid&scope=site&targetId=${site.id}`);
               if (siteRes.ok) {
                 const siteData = await siteRes.json();
+                console.log(`[Reload] Config for ${site.name}:`, siteData);
                 if (siteData && siteData.layout) {
+                  // Support both old format (just layout array) and new format (object with layout and cardConfig)
                   const layoutData = Array.isArray(siteData.layout)
                     ? { layout: siteData.layout, cardConfig: siteData.cardConfig || {} }
                     : siteData.layout;
+                  console.log(`[Reload] Parsed layout for ${site.name}:`, layoutData);
                   siteLayouts[site.id] = layoutData;
+                } else {
+                  console.log(`[Reload] No layout found for ${site.name}, response:`, siteData);
                 }
+              } else {
+                console.log(`[Reload] Failed to fetch config for ${site.name}, status:`, siteRes.status);
               }
             } catch (err) {
-              // Ignore individual site errors
+              console.error(`[Reload] Error fetching config for ${site.id}:`, err);
             }
           }));
-          setGridCardLayouts(prev => ({ ...prev, ...siteLayouts }));
+          console.log('[Reload] Site layouts loaded:', Object.keys(siteLayouts));
+          if (Object.keys(siteLayouts).length > 0) {
+            setGridCardLayouts(prev => {
+              const updated = { ...prev, ...siteLayouts };
+              console.log('[Reload] Updated gridCardLayouts:', Object.keys(updated));
+              return updated;
+            });
+          }
         }
 
         notifyDataRefreshed('Card layout updated');
@@ -608,6 +634,52 @@ const NOCDashboardV2 = ({ user, onLogout, onShowCardShowcase, onShowAuditLog }) 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isFocusMode]);
+
+  // Initialize Socket.io for real-time updates
+  useEffect(() => {
+    const socket = io();
+
+    socket.on('connect', () => {
+      // console.log('Connected to real-time monitoring stream');
+    });
+
+    socket.on('site-metrics', (data) => {
+      const { siteId, metrics } = data;
+      
+      // Update real-time metrics
+      setMetricsData(prev => {
+        const previous = prev[siteId] || {};
+        const enrichedData = {
+          ...metrics,
+          isReachable: metrics.packetLoss !== null && metrics.packetLoss !== undefined ? metrics.packetLoss < 100 : true,
+          _lastUpdated: Date.now()
+        };
+        return { ...prev, [siteId]: enrichedData };
+      });
+
+      // Update real-time graph history
+      setMetricsHistory(prev => {
+        const currentHistory = prev[siteId] || [];
+        const newPoint = {
+          timestamp: metrics.timestamp,
+          latency: metrics.latency !== null ? Number(metrics.latency) : null,
+          packetLoss: metrics.packetLoss !== null ? Number(metrics.packetLoss) : 0,
+          jitter: metrics.jitter !== null ? Number(metrics.jitter) : null,
+          isReachable: metrics.packetLoss < 100
+        };
+        
+        // Keep last 60 points (approx 1 hour at 1 min interval, or 10 mins at 10s interval)
+        // We want to see movement, so we append. 
+        // If the history is very long (loaded from API), we slice from end.
+        const newHistory = [...currentHistory, newPoint].slice(-60);
+        return { ...prev, [siteId]: newHistory };
+      });
+    });
+
+    return () => {
+      socket.disconnect();
+    };
+  }, []);
 
   // Load sites with periodic refresh
   useEffect(() => {

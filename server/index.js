@@ -3,6 +3,9 @@ const helmet = require('helmet');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 const cookieParser = require('cookie-parser');
+const http = require('http');
+const { Server } = require('socket.io');
+const compression = require('compression');
 // Trigger restart
 require('dotenv').config();
 
@@ -14,7 +17,28 @@ const cardConfigRoutes = require('./routes/card-config');
 const { requireAuth } = require('./auth/middleware');
 const monitoring = require('./monitoring');
 const limits = require('./limits');
+const cache = require('./cache');
 const app = express();
+const server = http.createServer(app);
+
+// Setup Socket.io
+const io = new Server(server, {
+  cors: {
+    origin: process.env.CLIENT_URL || 'http://localhost:3001',
+    methods: ['GET', 'POST'],
+    credentials: true
+  }
+});
+
+// Pass io instance to monitoring module
+monitoring.setIo(io);
+
+io.on('connection', (socket) => {
+  // console.log('Client connected to WebSocket:', socket.id);
+  socket.on('disconnect', () => {
+    // console.log('Client disconnected:', socket.id);
+  });
+});
 
 // Security middleware - MINIMAL for HTTP-only operation
 app.use(helmet({
@@ -30,6 +54,7 @@ app.use(cors({
   credentials: true
 }));
 
+app.use(compression()); // Enable gzip compression for performance
 app.use(express.json({ limit: '10mb' }));
 app.use(cookieParser());
 
@@ -123,7 +148,12 @@ app.get('/api/geocode', requireAuth, apiLimiter, async (req, res) => {
 // ============ SITES ROUTES ============
 app.get('/api/sites', requireAuth, async (req, res) => {
   try {
-    const sites = await prisma.site.findMany({ orderBy: { createdAt: 'desc' } });
+    // Cache site list
+    const sites = await cache.getOrSet(
+      cache.CACHE_KEYS.SITES + 'all',
+      cache.TTL.SITES,
+      () => prisma.site.findMany({ orderBy: { createdAt: 'desc' } })
+    );
     res.json(sites);
   } catch (error) {
     console.error(error);
@@ -182,6 +212,10 @@ app.put('/api/sites/:id', requireAuth, async (req, res) => {
         monitoringInterval: d.monitoringInterval || 60
       }
     });
+    
+    // Invalidate site cache
+    cache.invalidateSite(site.id);
+    
     if (site.monitoringIcmp) monitoring.startMonitoring(site.id, site.ip, site.failoverIp, site.monitoringSnmp ? site.snmpCommunity : null, site.monitoringInterval);
     await prisma.auditLog.create({ data: { userId: req.user.userId, action: 'site_updated', details: { siteId: site.id, siteName: site.name } } });
     res.json(site);
@@ -197,6 +231,10 @@ app.delete('/api/sites/:id', requireAuth, async (req, res) => {
     if (!site) return res.status(404).json({ error: 'Not found' });
     monitoring.stopMonitoring(req.params.id);
     await prisma.site.delete({ where: { id: req.params.id } });
+    
+    // Invalidate site cache
+    cache.invalidateSite(req.params.id);
+    
     await prisma.auditLog.create({ data: { userId: req.user.userId, action: 'site_deleted', details: { siteId: req.params.id, siteName: site.name } } });
     res.json({ message: 'Deleted' });
   } catch (error) {
@@ -211,6 +249,11 @@ app.delete('/api/sites', requireAuth, async (req, res) => {
     if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids required' });
     ids.forEach(id => monitoring.stopMonitoring(id));
     await prisma.site.deleteMany({ where: { id: { in: ids } } });
+    
+    // Invalidate site cache for all deleted sites
+    ids.forEach(id => cache.invalidateSite(id));
+    cache.invalidateSites();
+    
     await prisma.auditLog.create({ data: { userId: req.user.userId, action: 'sites_bulk_deleted', details: { siteIds: ids, count: ids.length } } });
     res.json({ message: `${ids.length} deleted` });
   } catch (error) {
@@ -222,9 +265,12 @@ app.delete('/api/sites', requireAuth, async (req, res) => {
 // Export Sites
 app.get('/api/sites/export', requireAuth, async (req, res) => {
   try {
-    const sites = await prisma.site.findMany({
-      orderBy: { createdAt: 'desc' }
-    });
+    // Use cached site list
+    const sites = await cache.getOrSet(
+      cache.CACHE_KEYS.SITES + 'all',
+      cache.TTL.SITES,
+      () => prisma.site.findMany({ orderBy: { createdAt: 'desc' } })
+    );
 
     res.json({ sites });
   } catch (error) {
@@ -352,6 +398,9 @@ app.post('/api/sites/import', requireAuth, async (req, res) => {
       }
     });
 
+    // Invalidate site cache after import
+    cache.invalidateSites();
+
     await prisma.auditLog.create({
       data: {
         userId,
@@ -370,7 +419,15 @@ app.post('/api/sites/import', requireAuth, async (req, res) => {
 // ============ MONITORING ROUTES ============
 app.get('/api/monitoring/:siteId', requireAuth, async (req, res) => {
   try {
-    const data = await prisma.monitoringData.findFirst({ where: { siteId: req.params.siteId }, orderBy: { timestamp: 'desc' } });
+    // Cache latest monitoring data
+    const data = await cache.getOrSet(
+      cache.CACHE_KEYS.MONITORING_LATEST + req.params.siteId,
+      cache.TTL.MONITORING_LATEST,
+      () => prisma.monitoringData.findFirst({ 
+        where: { siteId: req.params.siteId }, 
+        orderBy: { timestamp: 'desc' } 
+      })
+    );
     res.json(data || { latency: null, packetLoss: null, jitter: null, timestamp: null });
   } catch (error) {
     console.error(error);
@@ -383,7 +440,17 @@ app.get('/api/monitoring/:siteId/history', requireAuth, async (req, res) => {
     const hours = parseInt(req.query.hours) || 24;
     const since = new Date();
     since.setHours(since.getHours() - hours);
-    const history = await prisma.monitoringData.findMany({ where: { siteId: req.params.siteId, timestamp: { gte: since } }, orderBy: { timestamp: 'asc' } });
+    
+    // Cache history with hours as part of key
+    const cacheKey = `${cache.CACHE_KEYS.MONITORING_HISTORY}${req.params.siteId}:${hours}`;
+    const history = await cache.getOrSet(
+      cacheKey,
+      cache.TTL.MONITORING_HISTORY,
+      () => prisma.monitoringData.findMany({ 
+        where: { siteId: req.params.siteId, timestamp: { gte: since } }, 
+        orderBy: { timestamp: 'asc' } 
+      })
+    );
     res.json(history);
   } catch (error) {
     console.error(error);
@@ -393,7 +460,15 @@ app.get('/api/monitoring/:siteId/history', requireAuth, async (req, res) => {
 
 app.get('/api/monitoring/:siteId/snmp', requireAuth, async (req, res) => {
   try {
-    const data = await prisma.snmpData.findFirst({ where: { siteId: req.params.siteId }, orderBy: { timestamp: 'desc' } });
+    // Cache latest SNMP data
+    const data = await cache.getOrSet(
+      cache.CACHE_KEYS.SNMP_LATEST + req.params.siteId,
+      cache.TTL.SNMP_LATEST,
+      () => prisma.snmpData.findFirst({ 
+        where: { siteId: req.params.siteId }, 
+        orderBy: { timestamp: 'desc' } 
+      })
+    );
     res.json(data || { cpuUsage: null, memoryUsage: null, uptime: null, interfaceStats: null, timestamp: null });
   } catch (error) {
     console.error(error);
@@ -407,7 +482,12 @@ app.get('/api/monitoring/:siteId/netflow', requireAuth, (req, res) => {
 
 app.get('/api/monitoring/:siteId/meraki', requireAuth, async (req, res) => {
   try {
-    const site = await prisma.site.findUnique({ where: { id: req.params.siteId } });
+    // Cache site lookup
+    const site = await cache.getOrSet(
+      cache.CACHE_KEYS.SITE + req.params.siteId,
+      cache.TTL.SITE,
+      () => prisma.site.findUnique({ where: { id: req.params.siteId } })
+    );
     if (!site) {
       return res.status(404).json({ error: 'Site not found' });
     }
@@ -428,7 +508,12 @@ app.get('/api/monitoring/:siteId/meraki', requireAuth, async (req, res) => {
 // ============ PRESETS ROUTES ============
 app.get('/api/presets', requireAuth, async (req, res) => {
   try {
-    const presets = await prisma.preset.findMany({ orderBy: { createdAt: 'desc' } });
+    // Cache presets list
+    const presets = await cache.getOrSet(
+      cache.CACHE_KEYS.PRESETS + 'all',
+      cache.TTL.PRESETS,
+      () => prisma.preset.findMany({ orderBy: { createdAt: 'desc' } })
+    );
     res.json(presets);
   } catch (error) {
     console.error(error);
@@ -443,6 +528,10 @@ app.post('/api/presets', requireAuth, async (req, res) => {
     await limits.checkBeforeCreate('Preset', 500 + configSize);
 
     const preset = await prisma.preset.create({ data: { name: req.body.name, config: req.body.config } });
+    
+    // Invalidate presets cache
+    cache.delPattern(cache.CACHE_KEYS.PRESETS);
+    
     res.json(preset);
   } catch (error) {
     console.error(error);
@@ -695,7 +784,7 @@ if (process.env.NODE_ENV === 'production') {
   });
 }
 
-app.listen(PORT, async () => {
+server.listen(PORT, async () => {
   console.log(`✓ Server running on port ${PORT}`);
   console.log(`✓ Environment: ${process.env.NODE_ENV || 'development'}`);
 
@@ -713,17 +802,50 @@ app.listen(PORT, async () => {
 
     console.log(`✓ Started monitoring ${sites.length} sites`);
   } catch (err) {
+    // Check if it's a quota exceeded error
+    const isQuotaError = err?.message?.includes('exceeded the data transfer quota') ||
+                         err?.message?.includes('data transfer quota');
+    
+    if (isQuotaError) {
+      console.error('⚠️  Database quota exceeded - monitoring initialization skipped');
+      console.error('   Your Neon database has exceeded its monthly data transfer quota (5 GB).');
+      console.error('   Please upgrade your plan or wait for the quota to reset monthly.');
+    } else {
     console.error('Error initializing monitoring:', err.message);
+    }
   }
 
   // Initialize limits monitoring and cleanup
   try {
-    // Run initial cleanup
+    // Run initial cleanup (skip if quota exceeded)
+    try {
     await limits.runAutomaticCleanup();
+    } catch (err) {
+      const isQuotaError = err?.message?.includes('exceeded the data transfer quota') ||
+                           err?.message?.includes('data transfer quota');
+      if (isQuotaError) {
+        console.warn('⚠️  Skipping automatic cleanup - quota exceeded');
+      } else {
+        throw err;
+      }
+    }
 
-    // Log current usage
-    const usage = await limits.getUsageStats();
-    if (usage.storage) {
+    // Log current usage (skip if quota exceeded)
+    let usage;
+    try {
+      usage = await limits.getUsageStats();
+    } catch (err) {
+      const isQuotaError = err?.message?.includes('exceeded the data transfer quota') ||
+                           err?.message?.includes('data transfer quota');
+      if (isQuotaError) {
+        console.warn('⚠️  Skipping usage stats - quota exceeded');
+        usage = null;
+      } else {
+        throw err;
+      }
+    }
+    
+    if (usage && usage.storage) {
       console.log(`✓ Storage usage: ${usage.storage.used} GB / ${usage.storage.limit} GB (${usage.storage.percentage.toFixed(1)}%)`);
       if (usage.storage.percentage > 80) {
         console.warn(`⚠️  WARNING: Storage usage is at ${usage.storage.percentage.toFixed(1)}% - consider cleanup`);

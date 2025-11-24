@@ -1,10 +1,7 @@
 import React, { useMemo } from 'react';
-import { useSortable } from '@dnd-kit/sortable';
-import { CSS } from '@dnd-kit/utilities';
-import { GripVertical, Trash2 } from 'lucide-react';
-import { COMPONENT_TYPES } from './ComponentRegistry';
 import { AreaChart, Area, XAxis, YAxis, ResponsiveContainer, Tooltip, CartesianGrid, PieChart, Pie, Cell } from 'recharts';
-import { Activity, Wifi, AlertTriangle, Server, Zap, Clock, ChevronRight, Shield, Globe, Cpu, Database, BarChart2, Layout, Type, TrendingUp, List, Image } from 'lucide-react';
+import { Globe, Shield, Image } from 'lucide-react';
+import { COMPONENT_TYPES } from './ComponentRegistry';
 
 // High-fidelity mock data for preview
 const MOCK_METRICS = {
@@ -44,7 +41,7 @@ const MOCK_SITE = {
     failoverIp: '10.0.0.1'
 };
 
-const ComponentRenderer = ({ component, theme }) => {
+export const CardRenderer = ({ component, theme }) => {
     const { type, props } = component;
     const metrics = MOCK_METRICS;
     const snmp = MOCK_SNMP;
@@ -59,11 +56,7 @@ const ComponentRenderer = ({ component, theme }) => {
         if (key === 'packetLoss') return metrics?.packetLoss;
         if (key === 'jitter') return metrics?.jitter;
         
-        if (key === 'uptime') {
-             // Simple mock availability
-             return 100;
-        }
-        
+        if (key === 'uptime') return 100; // Mock availability
         if (key === 'sysUptime') return '120d';
         
         if (key === 'cpu') return snmp?.cpuUsage;
@@ -85,7 +78,7 @@ const ComponentRenderer = ({ component, theme }) => {
         return null;
     };
 
-    // Helper to format values (Copied from NOCCard logic)
+    // Helper to format values
     const formatValue = (key, value) => {
         if (value === null || value === undefined) return '--';
         
@@ -227,7 +220,6 @@ const ComponentRenderer = ({ component, theme }) => {
         );
 
       case COMPONENT_TYPES.GRAPH:
-        // Ensure colors are valid, fallback to defaults
         const graphStrokeColor = props.color && props.color !== 'transparent' ? props.color : theme.primary;
         const graphFillColor = props.fillOpacity ? graphStrokeColor : 'transparent';
         const graphFillOpacity = props.fillOpacity || 0.1;
@@ -238,7 +230,7 @@ const ComponentRenderer = ({ component, theme }) => {
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={graphData} margin={{ top: 5, right: 0, left: props.showAxes ? -20 : 0, bottom: 0 }}>
                   <defs>
-                    <linearGradient id={`gradLat-preview-${component.id}`} x1="0" y1="0" x2="0" y2="1">
+                    <linearGradient id={`gradLat-preview-${Math.random()}`} x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor={graphStrokeColor} stopOpacity={graphFillOpacity} />
                       <stop offset="95%" stopColor={graphStrokeColor} stopOpacity={0} />
                     </linearGradient>
@@ -268,7 +260,7 @@ const ComponentRenderer = ({ component, theme }) => {
                     dataKey="latency"
                     stroke={graphStrokeColor}
                     strokeWidth={2}
-                    fill={`url(#gradLat-preview-${component.id})`}
+                    fill={`url(#gradLat-preview-${Math.random()})`}
                     isAnimationActive={false}
                   />
                 </AreaChart>
@@ -283,11 +275,11 @@ const ComponentRenderer = ({ component, theme }) => {
                 <ResponsiveContainer width="100%" height="100%">
                     <AreaChart data={trafficData}>
                         <defs>
-                            <linearGradient id={`gradIn-preview-${component.id}`} x1="0" y1="0" x2="0" y2="1">
+                            <linearGradient id={`gradIn-preview-${Math.random()}`} x1="0" y1="0" x2="0" y2="1">
                                 <stop offset="5%" stopColor={props.inColor || '#10b981'} stopOpacity={0.2}/>
                                 <stop offset="95%" stopColor={props.inColor || '#10b981'} stopOpacity={0}/>
                             </linearGradient>
-                            <linearGradient id={`gradOut-preview-${component.id}`} x1="0" y1="0" x2="0" y2="1">
+                            <linearGradient id={`gradOut-preview-${Math.random()}`} x1="0" y1="0" x2="0" y2="1">
                                 <stop offset="5%" stopColor={props.outColor || '#3b82f6'} stopOpacity={0.2}/>
                                 <stop offset="95%" stopColor={props.outColor || '#3b82f6'} stopOpacity={0}/>
                             </linearGradient>
@@ -296,14 +288,14 @@ const ComponentRenderer = ({ component, theme }) => {
                             type="monotone" 
                             dataKey="in" 
                             stroke={props.inColor || '#10b981'} 
-                            fill={`url(#gradIn-preview-${component.id})`} 
+                            fill={`url(#gradIn-preview-${Math.random()})`} 
                             strokeWidth={2}
                         />
                         <Area 
                             type="monotone" 
                             dataKey="out" 
                             stroke={props.outColor || '#3b82f6'} 
-                            fill={`url(#gradOut-preview-${component.id})`} 
+                            fill={`url(#gradOut-preview-${Math.random()})`} 
                             strokeWidth={2} 
                         />
                     </AreaChart>
@@ -460,7 +452,7 @@ const ComponentRenderer = ({ component, theme }) => {
                 <ResponsiveContainer width="100%" height="100%">
                     <AreaChart data={sparkData}>
                         <defs>
-                            <linearGradient id={`spark-preview-${component.id}-${sparkMetric}`} x1="0" y1="0" x2="0" y2="1">
+                            <linearGradient id={`spark-preview-${Math.random()}-${sparkMetric}`} x1="0" y1="0" x2="0" y2="1">
                                 <stop offset="5%" stopColor={sparkColor} stopOpacity={0.3}/>
                                 <stop offset="95%" stopColor={sparkColor} stopOpacity={0}/>
                             </linearGradient>
@@ -469,7 +461,7 @@ const ComponentRenderer = ({ component, theme }) => {
                             type="monotone" 
                             dataKey="value" 
                             stroke={sparkColor} 
-                            fill={props.showArea ? `url(#spark-preview-${component.id}-${sparkMetric})` : 'none'} 
+                            fill={props.showArea ? `url(#spark-preview-${Math.random()}-${sparkMetric})` : 'none'} 
                             strokeWidth={2}
                             isAnimationActive={false}
                         />
@@ -582,43 +574,3 @@ const ComponentRenderer = ({ component, theme }) => {
     }
 };
 
-export const SortableItem = ({ id, component, theme, isSelected, onSelect }) => {
-    const {
-        attributes,
-        listeners,
-        setNodeRef,
-        transform,
-        transition,
-        isDragging
-    } = useSortable({ id });
-
-    const style = {
-        transform: CSS.Transform.toString(transform),
-        transition,
-        opacity: isDragging ? 0.5 : 1,
-        border: isSelected ? `2px solid ${theme.primary}` : '1px solid transparent',
-        borderRadius: '6px',
-        padding: '8px',
-        background: isSelected ? theme.bgSecondary : 'transparent',
-        cursor: 'pointer',
-        position: 'relative',
-        display: 'flex',
-        alignItems: 'flex-start',
-        gap: '8px'
-    };
-
-    return (
-        <div ref={setNodeRef} style={style} onClick={onSelect}>
-            <div
-                {...attributes}
-                {...listeners}
-                style={{ cursor: 'grab', marginTop: '4px', color: theme.textMuted }}
-            >
-                <GripVertical size={14} />
-            </div>
-            <div style={{ flex: 1 }}>
-                <ComponentRenderer component={component} theme={theme} />
-            </div>
-        </div>
-    );
-};

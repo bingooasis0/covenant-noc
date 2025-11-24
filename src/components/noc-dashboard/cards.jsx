@@ -32,11 +32,23 @@ export const DetailedGridCard = ({ site, metrics, history, snmp, api, alerts, on
 
   const graphData = useMemo(() => {
     if (!history || history.length === 0) return [];
-    return history.slice(-30).map(h => ({
-      latency: h.latency || 0,
-      loss: h.packetLoss || 0,
-      time: h.timestamp
-    }));
+    return history.slice(-30).map(h => {
+      // Preserve null values for latency - don't convert to 0 (0ms is valid, null means no data)
+      // The graph library will handle null by not drawing a point, which is correct
+      const latency = h.latency !== null && h.latency !== undefined 
+        ? Number(h.latency) 
+        : null;
+      
+      const packetLoss = h.packetLoss !== null && h.packetLoss !== undefined 
+        ? Number(h.packetLoss) 
+        : null;
+      
+      return {
+        latency: latency,
+        loss: packetLoss !== null ? packetLoss : 0, // Packet loss: 0 is valid, null becomes 0
+        time: h.timestamp
+      };
+    });
   }, [history]);
 
   return (
@@ -165,13 +177,47 @@ export const DetailedGridCard = ({ site, metrics, history, snmp, api, alerts, on
                 <stop offset="5%" stopColor={statusColor} stopOpacity={0.3} />
                 <stop offset="95%" stopColor={statusColor} stopOpacity={0} />
               </linearGradient>
+              <linearGradient id={`grad-loss-${site.id}`} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor={theme.danger || '#d93025'} stopOpacity={0.5} />
+                <stop offset="95%" stopColor={theme.danger || '#d93025'} stopOpacity={0} />
+              </linearGradient>
             </defs>
+            <Tooltip 
+              content={({ active, payload }) => {
+                if (!active || !payload || payload.length === 0) return null;
+                const data = payload[0].payload;
+                return (
+                  <div style={{
+                    background: theme.card || '#1a1a1a',
+                    border: `1px solid ${theme.border || '#333'}`,
+                    borderRadius: '6px',
+                    padding: '8px 12px',
+                    fontSize: '12px',
+                    color: theme.text || '#fff'
+                  }}>
+                    <div>Latency: {data.latency ? `${Math.round(data.latency)}ms` : '-'}</div>
+                    <div style={{ color: data.loss > 0 ? (theme.danger || '#d93025') : theme.textMuted }}>
+                      Loss: {data.loss !== null && data.loss !== undefined ? `${data.loss}%` : '0%'}
+                    </div>
+                  </div>
+                );
+              }}
+            />
             <Area
               type="monotone"
               dataKey="latency"
               stroke={statusColor}
               fill={`url(#grad-${site.id})`}
               strokeWidth={2}
+              isAnimationActive={false}
+            />
+            {/* Packet Loss Visualization - shows as red bars/area when loss > 0 */}
+            <Area
+              type="monotone"
+              dataKey="loss"
+              stroke={theme.danger || '#d93025'}
+              fill={`url(#grad-loss-${site.id})`}
+              strokeWidth={1.5}
               isAnimationActive={false}
             />
           </AreaChart>

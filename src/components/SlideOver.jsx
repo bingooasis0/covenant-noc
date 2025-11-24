@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { X, Activity, Terminal, Settings, Clock, Save, Play, Wifi, AlertTriangle } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { authFetch } from '../utils/api';
+import { ConfirmModal } from './noc-dashboard/modals';
+import { showSuccess, showError } from '../services/toast';
 
 const THEME = {
   bg: '#050505',
@@ -10,7 +12,10 @@ const THEME = {
   accent: '#2f81f7',
   text: '#e6edf3',
   textDim: '#8b949e',
-  codeBg: '#0d1117'
+  codeBg: '#0d1117',
+  success: '#3fb950',
+  warning: '#d29922',
+  danger: '#f85149'
 };
 
 const SlideOver = ({ site, onClose, isOpen, onUpdateSite }) => {
@@ -20,6 +25,8 @@ const SlideOver = ({ site, onClose, isOpen, onUpdateSite }) => {
   const [customInterval, setCustomInterval] = useState(site?.monitoringInterval || 60);
   const [localMetrics, setLocalMetrics] = useState(null);
   const [history, setHistory] = useState([]);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [formData, setFormData] = useState({});
 
   // Animation classes
   const translateClass = isOpen ? 'translate-x-0' : 'translate-x-full';
@@ -28,7 +35,15 @@ const SlideOver = ({ site, onClose, isOpen, onUpdateSite }) => {
   useEffect(() => {
     if (isOpen && site) {
       loadHistory();
+      loadLatestMetrics();
       setCustomInterval(site.monitoringInterval || 60);
+      setFormData({
+        failoverIp: site.failoverIp || '',
+        monitoringSnmp: site.monitoringSnmp || false,
+        snmpCommunity: site.snmpCommunity || 'public',
+        monitoringMeraki: site.monitoringMeraki || false,
+        apiKey: site.apiKey || ''
+      });
     }
   }, [isOpen, site]);
 
@@ -41,6 +56,27 @@ const SlideOver = ({ site, onClose, isOpen, onUpdateSite }) => {
       console.error('Failed to load history', err);
     }
   };
+
+  const loadLatestMetrics = async () => {
+    try {
+      const res = await authFetch(`/api/monitoring/${site.id}`);
+      const data = await res.json();
+      setLocalMetrics(data);
+    } catch (err) {
+      console.error('Failed to load metrics', err);
+    }
+  };
+
+  const getStatusColor = (status) => {
+    const s = (status || '').toLowerCase();
+    if (s === 'operational' || s === 'online') return THEME.success;
+    if (s === 'degraded') return THEME.warning;
+    if (s === 'critical' || s === 'offline') return THEME.danger;
+    return THEME.textDim;
+  };
+
+  const status = localMetrics?.status || site?.status || 'UNKNOWN';
+  const statusColor = getStatusColor(status);
 
   const runCommand = async (cmd) => {
     setIsRunning(true);
@@ -67,21 +103,33 @@ const SlideOver = ({ site, onClose, isOpen, onUpdateSite }) => {
     }
   };
 
-  const saveSettings = async () => {
+  const handleSaveClick = () => {
+    setShowConfirm(true);
+  };
+
+  const confirmSave = async () => {
     try {
       await authFetch(`/api/sites/${site.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           ...site,
-          monitoringInterval: parseInt(customInterval)
+          monitoringInterval: parseInt(customInterval),
+          ...formData
         })
       });
       if (onUpdateSite) onUpdateSite();
-      alert('Settings saved');
+      showSuccess('Settings saved successfully');
+      setShowConfirm(false);
     } catch (err) {
       console.error('Failed to save settings', err);
+      showError('Failed to save settings');
+      setShowConfirm(false);
     }
+  };
+
+  const handleInputChange = (field, value) => {
+    setFormData(prev => ({ ...prev, [field]: value }));
   };
 
   if (!isOpen || !site) return null;
@@ -180,10 +228,12 @@ const SlideOver = ({ site, onClose, isOpen, onUpdateSite }) => {
                 alignItems: 'center',
                 gap: '20px'
               }}>
-                <Activity size={32} color={THEME.accent} />
+                <Activity size={32} color={statusColor} />
                 <div>
                   <div style={{ color: THEME.textDim, fontSize: '12px' }}>CURRENT STATUS</div>
-                  <div style={{ fontSize: '24px', fontWeight: 600, color: THEME.success }}>OPERATIONAL</div>
+                  <div style={{ fontSize: '24px', fontWeight: 600, color: statusColor }}>
+                    {status.toUpperCase()}
+                  </div>
                 </div>
               </div>
 
@@ -277,11 +327,11 @@ const SlideOver = ({ site, onClose, isOpen, onUpdateSite }) => {
 
           {activeTab === 'settings' && (
             <div>
-              <div style={{ marginBottom: '24px' }}>
-                <label style={{ display: 'block', color: THEME.textDim, marginBottom: '8px', fontSize: '13px' }}>
-                  Polling Interval (Seconds)
-                </label>
-                <div style={{ display: 'flex', gap: '12px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                <div>
+                  <label style={{ display: 'block', color: THEME.textDim, marginBottom: '8px', fontSize: '13px' }}>
+                    Polling Interval (Seconds)
+                  </label>
                   <input 
                     type="number" 
                     value={customInterval}
@@ -292,11 +342,103 @@ const SlideOver = ({ site, onClose, isOpen, onUpdateSite }) => {
                       color: THEME.text,
                       padding: '10px',
                       borderRadius: '6px',
-                      width: '100px'
+                      width: '100%'
                     }}
                   />
+                  <p style={{ fontSize: '12px', color: THEME.textDim, marginTop: '4px' }}>
+                    Default is 60 seconds. Lower intervals increase load on the monitoring server.
+                  </p>
+                </div>
+
+                <div>
+                  <label style={{ display: 'block', color: THEME.textDim, marginBottom: '8px', fontSize: '13px' }}>
+                    Failover IP
+                  </label>
+                  <input 
+                    type="text" 
+                    value={formData.failoverIp}
+                    onChange={(e) => handleInputChange('failoverIp', e.target.value)}
+                    placeholder="e.g. 8.8.8.8"
+                    style={{
+                      background: 'rgba(0,0,0,0.2)',
+                      border: `1px solid ${THEME.border}`,
+                      color: THEME.text,
+                      padding: '10px',
+                      borderRadius: '6px',
+                      width: '100%'
+                    }}
+                  />
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <input 
+                    type="checkbox"
+                    id="monitoringSnmp"
+                    checked={formData.monitoringSnmp}
+                    onChange={(e) => handleInputChange('monitoringSnmp', e.target.checked)}
+                  />
+                  <label htmlFor="monitoringSnmp" style={{ color: THEME.text, fontSize: '14px' }}>
+                    Enable SNMP Monitoring
+                  </label>
+                </div>
+
+                {formData.monitoringSnmp && (
+                  <div>
+                    <label style={{ display: 'block', color: THEME.textDim, marginBottom: '8px', fontSize: '13px' }}>
+                      SNMP Community
+                    </label>
+                    <input 
+                      type="text" 
+                      value={formData.snmpCommunity}
+                      onChange={(e) => handleInputChange('snmpCommunity', e.target.value)}
+                      style={{
+                        background: 'rgba(0,0,0,0.2)',
+                        border: `1px solid ${THEME.border}`,
+                        color: THEME.text,
+                        padding: '10px',
+                        borderRadius: '6px',
+                        width: '100%'
+                      }}
+                    />
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <input 
+                    type="checkbox"
+                    id="monitoringMeraki"
+                    checked={formData.monitoringMeraki}
+                    onChange={(e) => handleInputChange('monitoringMeraki', e.target.checked)}
+                  />
+                  <label htmlFor="monitoringMeraki" style={{ color: THEME.text, fontSize: '14px' }}>
+                    Enable Meraki API Monitoring
+                  </label>
+                </div>
+
+                {formData.monitoringMeraki && (
+                  <div>
+                    <label style={{ display: 'block', color: THEME.textDim, marginBottom: '8px', fontSize: '13px' }}>
+                      Meraki API Key
+                    </label>
+                    <input 
+                      type="password" 
+                      value={formData.apiKey}
+                      onChange={(e) => handleInputChange('apiKey', e.target.value)}
+                      style={{
+                        background: 'rgba(0,0,0,0.2)',
+                        border: `1px solid ${THEME.border}`,
+                        color: THEME.text,
+                        padding: '10px',
+                        borderRadius: '6px',
+                        width: '100%'
+                      }}
+                    />
+                  </div>
+                )}
+
+                <div style={{ marginTop: '12px' }}>
                   <button
-                    onClick={saveSettings}
+                    onClick={handleSaveClick}
                     style={{
                       padding: '10px 20px',
                       background: THEME.accent,
@@ -309,18 +451,34 @@ const SlideOver = ({ site, onClose, isOpen, onUpdateSite }) => {
                       gap: '8px'
                     }}
                   >
-                    <Save size={16} /> Save
+                    <Save size={16} /> Save Settings
                   </button>
                 </div>
-                <p style={{ fontSize: '12px', color: THEME.textDim, marginTop: '8px' }}>
-                  Default is 60 seconds. Lower intervals increase load on the monitoring server.
-                </p>
               </div>
             </div>
           )}
 
         </div>
       </div>
+
+      {/* Confirm Modal */}
+      {showConfirm && (
+        <ConfirmModal
+          title="Save Changes"
+          message="Are you sure you want to save these changes? Monitoring behavior may change immediately."
+          onConfirm={confirmSave}
+          onCancel={() => setShowConfirm(false)}
+          theme={{
+            card: THEME.panelBg,
+            text: THEME.text,
+            textSecondary: THEME.textDim,
+            border: THEME.border,
+            bgSecondary: '#161b22',
+            danger: '#f85149',
+            primary: THEME.accent
+          }}
+        />
+      )}
     </>
   );
 };

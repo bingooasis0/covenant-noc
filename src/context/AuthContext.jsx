@@ -33,8 +33,7 @@ export function AuthProvider({ children }) {
         }
       } catch (error) {
         console.error('Auth check failed:', error);
-        localStorage.removeItem('accessToken');
-        localStorage.removeItem('refreshToken');
+        // Don't automatically clear tokens on error
       } finally {
         setIsLoaded(true);
       }
@@ -72,10 +71,8 @@ export function AuthProvider({ children }) {
         }
         return true;
       } else {
-        localStorage.removeItem('accessToken');
-        localStorage.removeItem('refreshToken');
-        setUser(null);
-        setAccessToken(null);
+        // Refresh failed, but don't automatically logout
+        // Just return false to indicate failure
         return false;
       }
     } catch (error) {

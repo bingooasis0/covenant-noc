@@ -1,18 +1,24 @@
 import React, { useState, useEffect } from 'react';
 import { DndContext, DragOverlay, closestCenter, useSensor, useSensors, PointerSensor } from '@dnd-kit/core';
 import { arrayMove } from '@dnd-kit/sortable';
-import { X, Save, RotateCcw } from 'lucide-react';
-import { AVAILABLE_COMPONENTS } from './ComponentRegistry';
+import { X, Save, RotateCcw, Undo2, LayoutTemplate } from 'lucide-react';
+import { AVAILABLE_COMPONENTS, COMPONENT_CATEGORIES } from './ComponentRegistry';
 import { DraggableComponent } from './DraggableComponent';
 import { DroppableCard } from './DroppableCard';
 import { PropertiesPanel } from './PropertiesPanel';
 import { authFetch } from '../../utils/api';
+import { ConfirmModal } from '../noc-dashboard/modals';
+import { TEMPLATES } from './Templates';
+import { CardRenderer } from './CardRenderer';
 
 const CardEditorModal = ({ isOpen, onClose, theme, onSave: onSaveCallback }) => {
     const [components, setComponents] = useState([]);
     const [selectedId, setSelectedId] = useState(null);
     const [activeDragItem, setActiveDragItem] = useState(null);
     const [loading, setLoading] = useState(false);
+    const [showResetConfirm, setShowResetConfirm] = useState(false);
+    const [showTemplates, setShowTemplates] = useState(false);
+    const [hoveredTemplate, setHoveredTemplate] = useState(null);
     const [cardConfig, setCardConfig] = useState({
         height: 'auto',
         minHeight: 200,
@@ -186,6 +192,11 @@ const CardEditorModal = ({ isOpen, onClose, theme, onSave: onSaveCallback }) => 
     };
 
     const handleSave = async () => {
+        if (scope === 'site' && !siteId) {
+            alert('Please select a site to save this configuration for.');
+            return;
+        }
+
         try {
             console.log('Saving config...', { components, cardConfig });
             const res = await authFetch('/api/card-config', {
@@ -216,6 +227,34 @@ const CardEditorModal = ({ isOpen, onClose, theme, onSave: onSaveCallback }) => 
         }
     };
 
+    const handleResetToDefault = () => {
+        setShowResetConfirm(true);
+    };
+
+    const confirmReset = () => {
+        setComponents(getDefaultLayout());
+        setCardConfig({
+            height: 'auto',
+            minHeight: 200,
+            maxHeight: null,
+            overflow: 'visible'
+        });
+        setShowResetConfirm(false);
+    };
+
+    const applyTemplate = (template) => {
+        if (window.confirm(`Apply "${template.label}" template? This will replace your current layout.`)) {
+            // Generate new unique IDs for components
+            const newLayout = template.layout.map(c => ({
+                ...c,
+                id: `${c.type}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+            }));
+            setComponents(newLayout);
+            setCardConfig(template.cardConfig || { height: 'auto', minHeight: 200 });
+            setShowTemplates(false);
+        }
+    };
+
     if (!isOpen) return null;
 
     return (
@@ -224,6 +263,88 @@ const CardEditorModal = ({ isOpen, onClose, theme, onSave: onSaveCallback }) => 
             background: 'rgba(0,0,0,0.8)', zIndex: 10000,
             display: 'flex', alignItems: 'center', justifyContent: 'center'
         }}>
+            {showResetConfirm && (
+                <ConfirmModal 
+                    title="Reset Layout"
+                    message="Are you sure you want to reset the layout to the default template? This will discard all current changes."
+                    onConfirm={confirmReset}
+                    onCancel={() => setShowResetConfirm(false)}
+                    theme={theme}
+                />
+            )}
+
+            {/* Templates Modal */}
+            {showTemplates && (
+                <div style={{
+                    position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
+                    width: '500px', background: theme.bgSecondary, border: `1px solid ${theme.border}`,
+                    borderRadius: '12px', zIndex: 10001, padding: '24px', boxShadow: '0 10px 25px rgba(0,0,0,0.5)'
+                }}>
+                    {/* Preview Tooltip */}
+                    {hoveredTemplate && (
+                        <div style={{
+                            position: 'absolute', top: '-20px', left: '105%', transform: 'translateY(-50%)',
+                            width: '320px', background: theme.bg, border: `1px solid ${theme.border}`,
+                            borderRadius: '8px', zIndex: 10002, padding: '16px', boxShadow: '0 5px 20px rgba(0,0,0,0.3)',
+                            pointerEvents: 'none' // Allow clicking through if it overlaps
+                        }}>
+                            <h4 style={{ margin: '0 0 12px 0', fontSize: '14px', color: theme.text }}>Preview</h4>
+                            <div style={{ transform: 'scale(0.7)', transformOrigin: 'top left', width: '142%' }}>
+                                <div style={{ 
+                                    background: theme.card || '#fff', 
+                                    border: `1px solid ${theme.border}`, 
+                                    borderRadius: '8px', 
+                                    padding: '16px', 
+                                    display: 'flex', 
+                                    flexDirection: 'column',
+                                    height: 'auto',
+                                    minHeight: hoveredTemplate.cardConfig?.minHeight || 200,
+                                    ...hoveredTemplate.cardConfig 
+                                }}>
+                                    {hoveredTemplate.layout.map(c => (
+                                        <CardRenderer key={c.id} component={c} theme={theme} />
+                                    ))}
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                        <h3 style={{ margin: 0, fontSize: '18px', color: theme.text }}>Select Template</h3>
+                        <button onClick={() => setShowTemplates(false)} style={{ background: 'transparent', border: 'none', color: theme.textSecondary, cursor: 'pointer' }}>
+                            <X size={20} />
+                        </button>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                        {TEMPLATES.map(template => (
+                            <div 
+                                key={template.id}
+                                onClick={() => applyTemplate(template)}
+                                style={{
+                                    padding: '12px',
+                                    border: `1px solid ${theme.border}`,
+                                    borderRadius: '8px',
+                                    background: theme.card,
+                                    cursor: 'pointer',
+                                    transition: 'border-color 0.2s'
+                                }}
+                                onMouseEnter={(e) => {
+                                    e.currentTarget.style.borderColor = theme.primary;
+                                    setHoveredTemplate(template);
+                                }}
+                                onMouseLeave={(e) => {
+                                    e.currentTarget.style.borderColor = theme.border;
+                                    setHoveredTemplate(null);
+                                }}
+                            >
+                                <div style={{ fontWeight: 600, color: theme.text, marginBottom: '4px' }}>{template.label}</div>
+                                <div style={{ fontSize: '12px', color: theme.textSecondary }}>{template.description}</div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+
             <div style={{
                 width: '90vw', height: '90vh', background: theme.bgSecondary,
                 borderRadius: '12px', display: 'flex', flexDirection: 'column',
@@ -267,16 +388,34 @@ const CardEditorModal = ({ isOpen, onClose, theme, onSave: onSaveCallback }) => 
                         )}
                     </div>
                     <div style={{ display: 'flex', gap: '12px' }}>
-                        <button onClick={loadConfig} style={{ background: 'transparent', border: 'none', color: theme.textSecondary, cursor: 'pointer' }}>
+                        <button 
+                            onClick={() => setShowTemplates(true)} 
+                            title="Apply Template"
+                            style={{ background: 'transparent', border: 'none', color: theme.textSecondary, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
+                        >
+                            <LayoutTemplate size={18} />
+                            <span style={{ fontSize: '13px' }}>Templates</span>
+                        </button>
+                        
+                        {scope === 'site' && (
+                            <button 
+                                onClick={handleResetToDefault} 
+                                title="Reset to Default Template"
+                                style={{ background: 'transparent', border: 'none', color: theme.textSecondary, cursor: 'pointer' }}
+                            >
+                                <Undo2 size={18} />
+                            </button>
+                        )}
+                        <button onClick={loadConfig} title="Reload Saved Config" style={{ background: 'transparent', border: 'none', color: theme.textSecondary, cursor: 'pointer' }}>
                             <RotateCcw size={18} />
                         </button>
-                        <button onClick={handleSave} style={{
+                        <button onClick={handleSave} title="Save Configuration" style={{
                             background: theme.primary, color: '#fff', border: 'none',
                             padding: '8px 16px', borderRadius: '6px', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer'
                         }}>
                             <Save size={16} /> Save
                         </button>
-                        <button onClick={onClose} style={{ background: 'transparent', border: 'none', color: theme.textSecondary, cursor: 'pointer' }}>
+                        <button onClick={onClose} title="Close Editor" style={{ background: 'transparent', border: 'none', color: theme.textSecondary, cursor: 'pointer' }}>
                             <X size={20} />
                         </button>
                     </div>
@@ -293,9 +432,24 @@ const CardEditorModal = ({ isOpen, onClose, theme, onSave: onSaveCallback }) => 
                         {/* Sidebar - Components */}
                         <div style={{ width: '250px', padding: '20px', borderRight: `1px solid ${theme.border}`, overflowY: 'auto', background: theme.bg, position: 'relative', zIndex: 1 }}>
                             <h3 style={{ fontSize: '12px', textTransform: 'uppercase', color: theme.textMuted, marginBottom: '16px' }}>Components</h3>
-                            {AVAILABLE_COMPONENTS.map(c => (
-                                <DraggableComponent key={c.type} {...c} theme={theme} />
-                            ))}
+                            
+                            {Object.values(COMPONENT_CATEGORIES).map(category => {
+                                const categoryComponents = AVAILABLE_COMPONENTS.filter(c => c.category === category);
+                                if (categoryComponents.length === 0) return null;
+                                
+                                return (
+                                    <div key={category} style={{ marginBottom: '20px' }}>
+                                        <h4 style={{ fontSize: '11px', textTransform: 'uppercase', color: theme.textMuted, marginBottom: '8px', borderBottom: `1px solid ${theme.border}`, paddingBottom: '4px' }}>
+                                            {category}
+                                        </h4>
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                                            {categoryComponents.map(c => (
+                                                <DraggableComponent key={c.type} {...c} theme={theme} />
+                                            ))}
+                                        </div>
+                                    </div>
+                                );
+                            })}
                         </div>
 
                         {/* Main - Preview */}

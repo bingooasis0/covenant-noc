@@ -3533,7 +3533,7 @@ const ConfirmModal = ({ title, message, onConfirm, onCancel, theme }) => {
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      zIndex: 1100,
+      zIndex: 10000, // Higher than SlideOver panel (9999) to appear on top
       padding: '24px'
     }}>
       <div

@@ -628,14 +628,31 @@ export const GridView = ({
                   const siteLayout = Array.isArray(siteLayoutData) ? siteLayoutData : (siteLayoutData?.layout || null);
                   const cardConfig = siteLayoutData?.cardConfig || {};
                   
+                  // Debugging for Main Office
+                  if (site.name === 'Main Office') {
+                    console.log('[GridView] Main Office Layout Check:', { 
+                      siteId: site.id,
+                      siteLayoutData, 
+                      siteLayout, 
+                      isArray: Array.isArray(siteLayout), 
+                      length: siteLayout?.length,
+                      allLayouts: Object.keys(gridCardLayouts),
+                      cardConfig
+                    });
+                  }
+
                   // Use NOCCard if custom layout exists, otherwise use DetailedGridCard
                   if (siteLayout && Array.isArray(siteLayout) && siteLayout.length > 0) {
+                    // Create a unique key that includes layout hash to force re-render when layout changes
+                    const layoutKey = site.id + '-' + (siteLayout.length + (cardConfig.height || '') + (cardConfig.minHeight || ''));
+                    
                     return (
                       <NOCCard
-                        key={site.id}
+                        key={layoutKey}
                         site={site}
                         metrics={metricsData[site.id]}
                         history={metricsHistory[site.id]}
+                        snmp={snmpData[site.id]}
                         alerts={alerts.filter(a => a.siteId === site.id && !acknowledgedAlerts.has(a.id))}
                         isSelected={selectedSites.has(site.id)}
                         onClick={(s) => setActiveDrillDown(s)}
@@ -716,6 +733,7 @@ export const NOCView = ({
               site={site}
               metrics={metricsData[site.id]}
               history={metricsHistory[site.id]}
+              snmp={snmpData[site.id]}
               alerts={alerts.filter(a => a.siteId === site.id && !acknowledgedAlerts.has(a.id))}
               isSelected={selectedSites.has(site.id)}
               onClick={(s) => setActiveDrillDown(s)}

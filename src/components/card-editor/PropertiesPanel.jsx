@@ -94,6 +94,9 @@ export const PropertiesPanel = ({ component, onChange, onDelete, theme, cardConf
                             <option value="bg">Background</option>
                             <option value="bgSecondary">Secondary</option>
                             <option value="bgTertiary">Tertiary</option>
+                            <option value="#ffffff">White</option>
+                            <option value="#000000">Black</option>
+                            <option value="#f6f8fa">Light Gray</option>
                         </select>
                     </div>
                 )}
@@ -139,6 +142,102 @@ export const PropertiesPanel = ({ component, onChange, onDelete, theme, cardConf
                         />
                     </div>
                 )}
+
+                {/* Color Overrides */}
+                <div style={{ marginTop: '12px', borderTop: `1px solid ${theme.border}`, paddingTop: '12px' }}>
+                    <h6 style={{ margin: '0 0 8px 0', fontSize: '11px', color: theme.textMuted, textTransform: 'uppercase' }}>Colors</h6>
+                    
+                    {component.props.hasOwnProperty('color') && (
+                        <div style={{ marginBottom: '8px' }}>
+                            <label style={{ display: 'block', fontSize: '12px', color: theme.textSecondary, marginBottom: '4px' }}>Primary Color</label>
+                            <div style={{ display: 'flex', gap: '8px' }}>
+                                <input
+                                    type="color"
+                                    value={component.props.color}
+                                    onChange={(e) => handleChange('color', e.target.value)}
+                                    style={{ width: '32px', height: '32px', padding: '0', border: `1px solid ${theme.border}`, borderRadius: '4px', cursor: 'pointer' }}
+                                />
+                                <input
+                                    type="text"
+                                    value={component.props.color}
+                                    onChange={(e) => handleChange('color', e.target.value)}
+                                    style={{ flex: 1, padding: '6px', borderRadius: '4px', border: `1px solid ${theme.border}`, background: theme.bg, color: theme.text }}
+                                />
+                            </div>
+                        </div>
+                    )}
+
+                    {component.props.hasOwnProperty('backgroundColor') && component.props.backgroundColor !== 'transparent' && component.props.backgroundColor !== 'bg' && component.props.backgroundColor !== 'bgSecondary' && component.props.backgroundColor !== 'bgTertiary' && (
+                         <div style={{ marginBottom: '8px' }}>
+                            <label style={{ display: 'block', fontSize: '12px', color: theme.textSecondary, marginBottom: '4px' }}>Background Color</label>
+                            <div style={{ display: 'flex', gap: '8px' }}>
+                                <input
+                                    type="color"
+                                    value={component.props.backgroundColor}
+                                    onChange={(e) => handleChange('backgroundColor', e.target.value)}
+                                    style={{ width: '32px', height: '32px', padding: '0', border: `1px solid ${theme.border}`, borderRadius: '4px', cursor: 'pointer' }}
+                                />
+                                <input
+                                    type="text"
+                                    value={component.props.backgroundColor}
+                                    onChange={(e) => handleChange('backgroundColor', e.target.value)}
+                                    style={{ flex: 1, padding: '6px', borderRadius: '4px', border: `1px solid ${theme.border}`, background: theme.bg, color: theme.text }}
+                                />
+                            </div>
+                        </div>
+                    )}
+                </div>
+
+                {component.props.hasOwnProperty('fontSize') && (
+                    <div style={{ marginBottom: '12px' }}>
+                        <label style={{ display: 'block', fontSize: '12px', color: theme.textSecondary, marginBottom: '4px' }}>Font Size</label>
+                        <select
+                            value={component.props.fontSize}
+                            onChange={(e) => handleChange('fontSize', e.target.value)}
+                            style={{ width: '100%', padding: '6px', borderRadius: '4px', border: `1px solid ${theme.border}`, background: theme.bg, color: theme.text }}
+                        >
+                            <option value="10px">Small (10px)</option>
+                            <option value="12px">Medium (12px)</option>
+                            <option value="14px">Large (14px)</option>
+                            <option value="16px">Extra Large (16px)</option>
+                            <option value="20px">20px</option>
+                            <option value="24px">24px</option>
+                            <option value="32px">32px</option>
+                            <option value="48px">48px</option>
+                        </select>
+                    </div>
+                )}
+
+                {component.props.hasOwnProperty('fontWeight') && (
+                    <div style={{ marginBottom: '12px' }}>
+                        <label style={{ display: 'block', fontSize: '12px', color: theme.textSecondary, marginBottom: '4px' }}>Font Weight</label>
+                        <select
+                            value={component.props.fontWeight || 'normal'}
+                            onChange={(e) => handleChange('fontWeight', e.target.value)}
+                            style={{ width: '100%', padding: '6px', borderRadius: '4px', border: `1px solid ${theme.border}`, background: theme.bg, color: theme.text }}
+                        >
+                            <option value="normal">Normal</option>
+                            <option value="500">Medium</option>
+                            <option value="600">Semi Bold</option>
+                            <option value="bold">Bold</option>
+                        </select>
+                    </div>
+                )}
+
+                {component.props.hasOwnProperty('align') && (
+                    <div style={{ marginBottom: '12px' }}>
+                        <label style={{ display: 'block', fontSize: '12px', color: theme.textSecondary, marginBottom: '4px' }}>Alignment</label>
+                        <select
+                            value={component.props.align}
+                            onChange={(e) => handleChange('align', e.target.value)}
+                            style={{ width: '100%', padding: '6px', borderRadius: '4px', border: `1px solid ${theme.border}`, background: theme.bg, color: theme.text }}
+                        >
+                            <option value="left">Left</option>
+                            <option value="center">Center</option>
+                            <option value="right">Right</option>
+                        </select>
+                    </div>
+                )}
             </div>
         </>
     );
@@ -171,6 +270,14 @@ export const PropertiesPanel = ({ component, onChange, onDelete, theme, cardConf
                                 onChange={(e) => handleChange('showFailover', e.target.checked)}
                             />
                             Show Failover IP
+                        </label>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: theme.text }}>
+                            <input
+                                type="checkbox"
+                                checked={component.props.borderBottom}
+                                onChange={(e) => handleChange('borderBottom', e.target.checked)}
+                            />
+                            Show Border Bottom
                         </label>
                         {renderCommonStyling()}
                     </>
@@ -237,6 +344,47 @@ export const PropertiesPanel = ({ component, onChange, onDelete, theme, cardConf
                         {renderCommonStyling()}
                     </>
                 );
+            case COMPONENT_TYPES.TRAFFIC_GRAPH:
+                return (
+                    <>
+                        <div style={{ marginBottom: '12px' }}>
+                            <label style={{ display: 'block', fontSize: '12px', color: theme.textSecondary, marginBottom: '4px' }}>Height (px)</label>
+                            <input
+                                type="number"
+                                value={component.props.height}
+                                onChange={(e) => handleChange('height', parseInt(e.target.value))}
+                                style={{ width: '100%', padding: '6px', borderRadius: '4px', border: `1px solid ${theme.border}`, background: theme.bg, color: theme.text }}
+                            />
+                        </div>
+                        <div style={{ marginBottom: '12px' }}>
+                            <label style={{ display: 'block', fontSize: '12px', color: theme.textSecondary, marginBottom: '4px' }}>Inbound Color</label>
+                            <input
+                                type="color"
+                                value={component.props.inColor}
+                                onChange={(e) => handleChange('inColor', e.target.value)}
+                                style={{ width: '100%', height: '32px', padding: '2px', borderRadius: '4px', border: `1px solid ${theme.border}`, background: theme.bg }}
+                            />
+                        </div>
+                        <div style={{ marginBottom: '12px' }}>
+                            <label style={{ display: 'block', fontSize: '12px', color: theme.textSecondary, marginBottom: '4px' }}>Outbound Color</label>
+                            <input
+                                type="color"
+                                value={component.props.outColor}
+                                onChange={(e) => handleChange('outColor', e.target.value)}
+                                style={{ width: '100%', height: '32px', padding: '2px', borderRadius: '4px', border: `1px solid ${theme.border}`, background: theme.bg }}
+                            />
+                        </div>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: theme.text }}>
+                            <input
+                                type="checkbox"
+                                checked={component.props.showAxes}
+                                onChange={(e) => handleChange('showAxes', e.target.checked)}
+                            />
+                            Show Axes
+                        </label>
+                        {renderCommonStyling()}
+                    </>
+                );
             case COMPONENT_TYPES.SINGLE_METRIC:
                 return (
                     <>
@@ -270,14 +418,18 @@ export const PropertiesPanel = ({ component, onChange, onDelete, theme, cardConf
                                 style={{ width: '100%', padding: '6px', borderRadius: '4px', border: `1px solid ${theme.border}`, background: theme.bg, color: theme.text }}
                             />
                         </div>
-                        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: theme.text }}>
-                            <input
-                                type="checkbox"
-                                checked={component.props.showTrend}
-                                onChange={(e) => handleChange('showTrend', e.target.checked)}
-                            />
-                            Show Trend
-                        </label>
+                        <div style={{ marginBottom: '12px' }}>
+                            <label style={{ display: 'block', fontSize: '12px', color: theme.textSecondary, marginBottom: '4px' }}>Alignment</label>
+                            <select
+                                value={component.props.alignment}
+                                onChange={(e) => handleChange('alignment', e.target.value)}
+                                style={{ width: '100%', padding: '6px', borderRadius: '4px', border: `1px solid ${theme.border}`, background: theme.bg, color: theme.text }}
+                            >
+                                <option value="flex-start">Left</option>
+                                <option value="center">Center</option>
+                                <option value="flex-end">Right</option>
+                            </select>
+                        </div>
                         {renderCommonStyling()}
                     </>
                 );

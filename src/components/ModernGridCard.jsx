@@ -17,11 +17,22 @@ const ModernGridCard = ({ site, metrics, history, onClick, isSelected, theme = {
   const graphData = useMemo(() => {
     if (!history || history.length === 0) return [];
     // Take last 20 points for the sparkline
-    return history.slice(-20).map(h => ({
-      latency: h.latency || 0,
-      packetLoss: h.packetLoss || 0,
-      timestamp: h.timestamp
-    }));
+    return history.slice(-20).map(h => {
+      // Preserve null values for accurate latency representation
+      const latency = h.latency !== null && h.latency !== undefined 
+        ? Number(h.latency) 
+        : null;
+      
+      const packetLoss = h.packetLoss !== null && h.packetLoss !== undefined 
+        ? Number(h.packetLoss) 
+        : null;
+      
+      return {
+        latency: latency,
+        packetLoss: packetLoss !== null ? packetLoss : 0,
+        timestamp: h.timestamp
+      };
+    });
   }, [history]);
 
   return (

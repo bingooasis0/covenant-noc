@@ -1,11 +1,29 @@
 const ping = require('ping');
+const os = require('os');
 const prisma = require('./prisma');
 const snmp = require('./snmp');
 const merakiApi = require('./meraki-api');
 const limits = require('./limits');
+const cache = require('./cache');
+
+// Detect platform for ping command flags
+// Development: Windows, Production: Ubuntu/Linux
+const platform = os.platform();
+const isWindows = platform === 'win32';
+const isLinux = platform === 'linux';
+const isMac = platform === 'darwin';
+
+// Log platform detection for debugging
+console.log(`[Monitor] Platform detected: ${platform} (Windows: ${isWindows}, Linux: ${isLinux}, Mac: ${isMac})`);
 
 // Active monitoring intervals by site ID
 const monitoringIntervals = new Map();
+let io = null; // Socket.io instance
+
+// Set IO instance
+function setIo(ioInstance) {
+  io = ioInstance;
+}
 
 // Track consecutive failures per site for hysteresis
 const siteStatusState = new Map(); // { siteId: { consecutiveFailures: 0 } }
@@ -20,17 +38,41 @@ function normalizeMetric(value) {
 }
 
 // Ping a host and return metrics (numbers instead of strings)
-async function pingHost(host, retries = 2) {
+async function pingHost(host, retries = 3) {
+  // Use platform-specific ping flags
+  // Windows: -n for count, -w for timeout (milliseconds)
+  // Linux/Ubuntu: -c for count, -W for timeout (seconds) 
+  // Mac: -c for count, -W for timeout (seconds)
+  const pingConfig = isWindows 
+    ? {
+        timeout: 10, // 10 seconds timeout
+        extra: ['-n', '5', '-w', '10000'] // Windows: send 5 packets, 10 second timeout per packet
+      }
+    : {
+        timeout: 10, // 10 seconds timeout
+        extra: ['-c', '5', '-W', '10'] // Linux/Ubuntu/Mac: send 5 packets, 10 second timeout
+      };
+
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      const res = await ping.promise.probe(host, {
-        timeout: 15, // 15 second timeout per ping
-        extra: ['-c', '5'], // Linux: send 5 packets for better stability
-      });
+      const res = await ping.promise.probe(host, pingConfig);
 
       // Check if we got valid response data (even if alive is false, we might have partial data)
       const hasValidData = res.time !== undefined && res.time !== null && res.time !== 'unknown';
-      const packetLoss = normalizeMetric(res.packetLoss) ?? (res.alive ? 0 : 100);
+      
+      // Normalize packet loss - ping library may return it as string or number
+      let packetLoss = normalizeMetric(res.packetLoss);
+      
+      // If packetLoss is null/undefined, derive from alive status
+      if (packetLoss === null || packetLoss === undefined) {
+        packetLoss = res.alive ? 0 : 100;
+      }
+      
+      // On Windows, the ping library may not always parse packetLoss correctly
+      // If we got a successful ping but packetLoss is still 100, assume 0% loss
+      if (res.alive && packetLoss >= 100) {
+        packetLoss = 0;
+      }
       
       // If we have valid latency data OR host is alive, consider it successful
       if (res.alive || hasValidData) {
@@ -45,26 +87,37 @@ async function pingHost(host, retries = 2) {
         };
       }
       
-      // If failed and we have retries left, wait and retry
+      // If failed and we have retries left, wait and retry with exponential backoff
       if (attempt < retries) {
-        console.log(`[Monitor] Ping failed for ${host}, retrying (attempt ${attempt + 1}/${retries})...`);
-        await new Promise(resolve => setTimeout(resolve, 2000)); // 2 second delay between retries
+        const delay = Math.min(2000 * Math.pow(1.5, attempt), 5000); // Exponential backoff, max 5s
+        console.log(`[Monitor] Ping failed for ${host}, retrying (attempt ${attempt + 1}/${retries + 1}) in ${delay}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
         continue;
       }
 
     } catch (err) {
       // Only log error if it's not a timeout (timeouts are expected for down hosts)
-      if (!err.message.includes('timeout') && !err.message.includes('ETIMEDOUT')) {
-        console.error(`[Monitor] Ping error for ${host} (attempt ${attempt + 1}):`, err.message);
+      const isTimeout = err.message && (
+        err.message.includes('timeout') || 
+        err.message.includes('ETIMEDOUT') ||
+        err.message.includes('Request timeout')
+      );
+      
+      if (!isTimeout) {
+        console.error(`[Monitor] Ping error for ${host} (attempt ${attempt + 1}/${retries + 1}):`, err.message);
       }
+      
       if (attempt < retries) {
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        const delay = Math.min(2000 * Math.pow(1.5, attempt), 5000);
+        await new Promise(resolve => setTimeout(resolve, delay));
         continue;
       }
     }
   }
 
   // All retries failed - return failure result
+  // But don't immediately mark as 100% loss - this might be a transient network issue
+  console.log(`[Monitor] All ping attempts failed for ${host} after ${retries + 1} tries`);
   return {
     alive: false,
     time: null,
@@ -113,8 +166,13 @@ async function monitorSite(siteId, primaryIp, failoverIp = null, snmpCommunity =
 
   // --- HYSTERESIS LOGIC START ---
   // Prevent flapping by requiring consecutive failures before marking as critical
+  // Also track recent successes to avoid false positives
   if (!siteStatusState.has(siteId)) {
-    siteStatusState.set(siteId, { consecutiveFailures: 0 });
+    siteStatusState.set(siteId, { 
+      consecutiveFailures: 0,
+      recentSuccesses: 0,
+      lastSuccessTime: null
+    });
   }
   
   const state = siteStatusState.get(siteId);
@@ -124,30 +182,63 @@ async function monitorSite(siteId, primaryIp, failoverIp = null, snmpCommunity =
 
   if (status === 'critical') {
     state.consecutiveFailures++;
-    // Require 3 consecutive failures (approx 3 minutes) before alerting/changing status
-    if (state.consecutiveFailures < 3) {
+    
+    // If we had recent successes (within last 5 minutes), be more lenient
+    const recentSuccessWindow = 5 * 60 * 1000; // 5 minutes
+    const hasRecentSuccess = state.lastSuccessTime && 
+      (Date.now() - state.lastSuccessTime) < recentSuccessWindow;
+    
+    // Require more consecutive failures if we had recent successes (indicates flapping)
+    const requiredFailures = hasRecentSuccess ? 5 : 3;
+    
+    if (state.consecutiveFailures < requiredFailures) {
       // Suppress the failure!
-      console.log(`[Monitor] Site ${siteId} check failed (${state.consecutiveFailures}/3), suppressing critical status.`);
+      console.log(`[Monitor] Site ${siteId} check failed (${state.consecutiveFailures}/${requiredFailures}), suppressing critical status. ${hasRecentSuccess ? 'Recent success detected - using stricter threshold.' : ''}`);
       reportedStatus = 'degraded'; // Keep status as degraded/operational
       
-      // KEY FIX: Also suppress the packet loss in the reported metrics
+      // Suppress the packet loss in the reported metrics
       // so the dashboard graph doesn't show a "down" spike during these transient failures.
-      // We'll report 0% loss but high latency (or null latency) to indicate "something is up but not DOWN"
-      reportedMetrics.packetLoss = 0; 
+      // We'll report the actual packet loss but mark as alive to indicate "something is up but degraded"
+      if (metrics.packetLoss >= 100) {
+        reportedMetrics.packetLoss = Math.min(metrics.packetLoss, 50); // Cap at 50% for transient failures
+      }
       reportedMetrics.alive = true;
+    } else {
+      // We've exceeded the threshold - this is a real failure
+      console.log(`[Monitor] Site ${siteId} confirmed critical after ${state.consecutiveFailures} consecutive failures.`);
+      state.recentSuccesses = 0; // Reset success counter
     }
   } else {
-    // If we get a good ping, reset immediately
+    // If we get a good ping, reset failure counter and track success
     if (state.consecutiveFailures > 0) {
       console.log(`[Monitor] Site ${siteId} recovered after ${state.consecutiveFailures} failures.`);
     }
     state.consecutiveFailures = 0;
+    state.recentSuccesses = (state.recentSuccesses || 0) + 1;
+    state.lastSuccessTime = Date.now();
+    
+    // Reset success counter if it gets too high (prevent overflow)
+    if (state.recentSuccesses > 100) {
+      state.recentSuccesses = 10;
+    }
   }
   // --- HYSTERESIS LOGIC END ---
 
   // Store monitoring data (check if site still exists first)
+  // Use a timeout to prevent database operations from blocking ping operations
   try {
-    const siteExists = await prisma.site.findUnique({ where: { id: siteId } });
+    // Check cache first, then database
+    let siteExists = cache.get(cache.CACHE_KEYS.SITE + siteId);
+    if (!siteExists) {
+    const dbOperation = Promise.race([
+      prisma.site.findUnique({ where: { id: siteId } }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Database timeout')), 5000))
+    ]);
+      siteExists = await dbOperation;
+      if (siteExists) {
+        cache.set(cache.CACHE_KEYS.SITE + siteId, siteExists, cache.TTL.SITE);
+      }
+    }
 
     if (!siteExists) {
       console.log(`[Monitor] Site ${siteId} no longer exists, stopping monitoring`);
@@ -158,19 +249,44 @@ async function monitorSite(siteId, primaryIp, failoverIp = null, snmpCommunity =
     // Check storage limits before creating (estimate ~100 bytes per record)
     await limits.checkBeforeCreate('MonitoringData', 100);
 
-    await prisma.monitoringData.create({
-      data: {
-        siteId,
-        latency: reportedMetrics.avg, // Use reported (dampened) metrics
-        packetLoss: reportedMetrics.packetLoss,
-        jitter: reportedMetrics.stddev
-      }
-    });
+    // Use Promise.race to timeout database writes if they take too long
+    // Store latency as avg (average of 5 pings) - this is the most accurate representation
+    // If avg is null but we have a single ping time, use that as fallback
+    const latencyToStore = reportedMetrics.avg !== null && reportedMetrics.avg !== undefined
+      ? reportedMetrics.avg
+      : (reportedMetrics.time !== null && reportedMetrics.time !== undefined ? reportedMetrics.time : null);
+    
+    const writeOperation = Promise.race([
+      prisma.monitoringData.create({
+        data: {
+          siteId,
+          latency: latencyToStore, // Average latency from 5 pings (or single ping fallback)
+          packetLoss: reportedMetrics.packetLoss !== null && reportedMetrics.packetLoss !== undefined 
+            ? reportedMetrics.packetLoss 
+            : (reportedMetrics.alive ? 0 : 100),
+          jitter: reportedMetrics.stddev // Standard deviation (jitter)
+        }
+      }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Database write timeout')), 3000))
+    ]);
+
+    await writeOperation;
+    
+    // Invalidate monitoring cache after successful write
+    cache.invalidateMonitoring(siteId);
   } catch (err) {
-    console.error(`[Monitor] Error storing data for site ${siteId}:`, err.message);
-    // Don't stop monitoring just because DB write failed (could be temporary)
-    // stopMonitoring(siteId); 
-    return null;
+    // Log but don't fail the monitoring cycle - database issues shouldn't stop pings
+    const isTimeout = err.message && err.message.includes('timeout');
+    const isConnectionError = err.code === 'P1001' || err.code === 'P1002' || err.code === 'P1008';
+    
+    if (isTimeout || isConnectionError) {
+      console.warn(`[Monitor] Database operation timeout/error for site ${siteId} (non-critical):`, err.message);
+    } else {
+      console.error(`[Monitor] Error storing data for site ${siteId}:`, err.message);
+    }
+    
+    // Continue monitoring even if DB write fails - don't let DB issues cause false offline reports
+    // The ping succeeded, so we still return the metrics
   }
 
   // Collect SNMP metrics if enabled
@@ -194,7 +310,7 @@ async function monitorSite(siteId, primaryIp, failoverIp = null, snmpCommunity =
 
       const sanitizedMetrics = sanitize(snmpMetrics);
 
-      await prisma.snmpData.create({
+      const snmpRecord =       await prisma.snmpData.create({
         data: {
           siteId,
           cpuUsage: sanitizedMetrics.cpu,
@@ -203,6 +319,9 @@ async function monitorSite(siteId, primaryIp, failoverIp = null, snmpCommunity =
           interfaceStats: sanitizedMetrics.interfaces || {}
         }
       });
+
+      // Invalidate SNMP cache after successful write
+      cache.invalidateSnmp(siteId);
 
       // Log based on what data we got
       if (snmpMetrics.cpu || snmpMetrics.memory?.usedPercent) {
@@ -218,13 +337,39 @@ async function monitorSite(siteId, primaryIp, failoverIp = null, snmpCommunity =
     }
   }
 
-  // Update site status
-  await prisma.site.update({
-    where: { id: siteId },
-    data: { status: reportedStatus, lastSeen: new Date() }
-  });
+  // Update site status (with timeout protection)
+  try {
+    const updateOperation = Promise.race([
+      prisma.site.update({
+        where: { id: siteId },
+        data: { status: reportedStatus, lastSeen: new Date() }
+      }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Database update timeout')), 2000))
+    ]);
+    
+    await updateOperation;
+  } catch (err) {
+    // Log but don't fail - status update is less critical than data storage
+    if (!err.message.includes('timeout')) {
+      console.warn(`[Monitor] Failed to update site status for ${siteId}:`, err.message);
+    }
+  }
 
   console.log(`[Monitor] Site ${siteId} (${activeIp}): ${reportedStatus} (raw: ${status}) - ${reportedMetrics.avg}ms, ${reportedMetrics.packetLoss}% loss`);
+
+  // Emit real-time update
+  if (io) {
+    io.emit('site-metrics', {
+      siteId,
+      metrics: {
+        ...reportedMetrics,
+        latency: reportedMetrics.avg !== null ? reportedMetrics.avg : (reportedMetrics.time !== null ? reportedMetrics.time : null),
+        packetLoss: reportedMetrics.packetLoss,
+        timestamp: new Date().toISOString(),
+        status: reportedStatus
+      }
+    });
+  }
 
   return { ...reportedMetrics, status: reportedStatus, usingFailover, activeIp };
 }
@@ -361,5 +506,6 @@ module.exports = {
   getMetricsHistory,
   calculateUptime,
   getMerakiMetrics,
-  cleanupOldData
+  cleanupOldData,
+  setIo
 };

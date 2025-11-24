@@ -11,6 +11,15 @@
  */
 
 const prisma = require('./prisma');
+const cache = require('./cache');
+
+// Helper to detect quota exceeded errors
+function isQuotaExceededError(error) {
+  return error?.message?.includes('exceeded the data transfer quota') ||
+         error?.message?.includes('data transfer quota') ||
+         error?.code === 'P1001' ||
+         (error?.meta?.code === '53300' && error?.meta?.message?.includes('quota'));
+}
 
 // Free tier limits (in bytes/hours/bytes)
 const LIMITS = {
@@ -49,7 +58,19 @@ async function estimateStorageUsage() {
       prisma.preset.count(),
       prisma.auditLog.count(),
       prisma.refreshToken.count()
-    ]);
+    ]).catch(error => {
+      // If quota exceeded, return null to skip storage estimation
+      if (isQuotaExceededError(error)) {
+        console.warn('[Limits] Skipping storage estimation - quota exceeded');
+        return null;
+      }
+      throw error;
+    });
+    
+    // If quota exceeded, return null
+    if (!users && users !== 0) {
+      return null;
+    }
 
     // Rough size estimates per row (in bytes)
     const ESTIMATES = {
@@ -221,6 +242,9 @@ async function aggressiveCleanup() {
   const totalDeleted = monitoringDeleted + snmpDeleted + auditDeleted + tokensDeleted;
   console.log(`[Limits] Aggressive cleanup complete: ${totalDeleted} records deleted`);
 
+  // Invalidate usage stats cache after cleanup
+  cache.invalidateUsageStats();
+
   return totalDeleted;
 }
 
@@ -249,6 +273,9 @@ async function runAutomaticCleanup() {
     if (updatedUsage) {
       console.log(`[Limits] Storage usage: ${updatedUsage.totalMB} MB / ${updatedUsage.limitGB} GB (${updatedUsage.percentage.toFixed(1)}%)`);
     }
+    
+    // Invalidate usage stats cache after cleanup
+    cache.invalidateUsageStats();
   } catch (error) {
     console.error('[Limits] Error in automatic cleanup:', error);
   }
@@ -281,37 +308,44 @@ async function checkBeforeCreate(model, estimatedBytes) {
 }
 
 /**
- * Get current usage statistics
+ * Get current usage statistics (cached)
  */
 async function getUsageStats() {
-  const storage = await estimateStorageUsage();
-  
-  return {
-    storage: storage ? {
-      used: storage.totalGB,
-      limit: storage.limitGB,
-      percentage: storage.percentage,
-      breakdown: {
-        users: Math.round((storage.breakdown.users / (1024 * 1024)) * 100) / 100,
-        sites: Math.round((storage.breakdown.sites / (1024 * 1024)) * 100) / 100,
-        monitoringData: Math.round((storage.breakdown.monitoringData / (1024 * 1024)) * 100) / 100,
-        snmpData: Math.round((storage.breakdown.snmpData / (1024 * 1024)) * 100) / 100,
-        presets: Math.round((storage.breakdown.presets / (1024 * 1024)) * 100) / 100,
-        auditLogs: Math.round((storage.breakdown.auditLogs / (1024 * 1024)) * 100) / 100,
-        refreshTokens: Math.round((storage.breakdown.refreshTokens / (1024 * 1024)) * 100) / 100,
-        overhead: Math.round((storage.breakdown.overhead / (1024 * 1024)) * 100) / 100
-      }
-    } : null,
-    compute: {
-      limit: LIMITS.COMPUTE_CU_HRS,
-      note: 'Compute usage is tracked by Neon. Monitor in Neon dashboard.'
-    },
-    network: {
-      limit: LIMITS.NETWORK_TRANSFER_BYTES / (1024 * 1024 * 1024), // Convert to GB
-      note: 'Network transfer is tracked by Neon. Monitor in Neon dashboard.'
-    },
-    retention: RETENTION_POLICIES
-  };
+  // Cache usage stats to avoid frequent count queries
+  return await cache.getOrSet(
+    cache.CACHE_KEYS.USAGE_STATS,
+    cache.TTL.USAGE_STATS,
+    async () => {
+      const storage = await estimateStorageUsage();
+      
+      return {
+        storage: storage ? {
+          used: storage.totalGB,
+          limit: storage.limitGB,
+          percentage: storage.percentage,
+          breakdown: {
+            users: Math.round((storage.breakdown.users / (1024 * 1024)) * 100) / 100,
+            sites: Math.round((storage.breakdown.sites / (1024 * 1024)) * 100) / 100,
+            monitoringData: Math.round((storage.breakdown.monitoringData / (1024 * 1024)) * 100) / 100,
+            snmpData: Math.round((storage.breakdown.snmpData / (1024 * 1024)) * 100) / 100,
+            presets: Math.round((storage.breakdown.presets / (1024 * 1024)) * 100) / 100,
+            auditLogs: Math.round((storage.breakdown.auditLogs / (1024 * 1024)) * 100) / 100,
+            refreshTokens: Math.round((storage.breakdown.refreshTokens / (1024 * 1024)) * 100) / 100,
+            overhead: Math.round((storage.breakdown.overhead / (1024 * 1024)) * 100) / 100
+          }
+        } : null,
+        compute: {
+          limit: LIMITS.COMPUTE_CU_HRS,
+          note: 'Compute usage is tracked by Neon. Monitor in Neon dashboard.'
+        },
+        network: {
+          limit: LIMITS.NETWORK_TRANSFER_BYTES / (1024 * 1024 * 1024), // Convert to GB
+          note: 'Network transfer is tracked by Neon. Monitor in Neon dashboard.'
+        },
+        retention: RETENTION_POLICIES
+      };
+    }
+  );
 }
 
 module.exports = {

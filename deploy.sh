@@ -35,13 +35,14 @@ npm run build
 # Check for .env file
 if [ ! -f ".env" ]; then
     echo "⚠️  .env file not found!"
-    if [ -f ".env.example" ]; then
-        echo "📋 Copying .env.example to .env"
-        cp .env.example .env
+    if [ -f "env.example" ]; then
+        echo "📋 Copying env.example to .env"
+        cp env.example .env
         echo "⚠️  Please edit .env file with your configuration before continuing"
+        echo "   IMPORTANT: Set CLIENT_URL to your production server URL (e.g., http://10.1.0.20:3000)"
         exit 1
     else
-        echo "❌ No .env.example found. Please create .env file manually."
+        echo "❌ No env.example found. Please create .env file manually."
         exit 1
     fi
 fi

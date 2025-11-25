@@ -51,6 +51,141 @@ import {
 } from '../../services/toast';
 import { ConfirmModal } from './modals';
 
+// Move helper components outside of EnhancedSettingsModal
+// Ensure these are not redefined on each render
+const SectionHeader = ({ title, description, action, theme }) => (
+  <div style={{ marginBottom: '24px', paddingBottom: '16px', borderBottom: `1px solid ${theme.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+    <div>
+      <h2 style={{ margin: '0 0 6px 0', fontSize: '24px', fontWeight: 700, color: theme.text }}>{title}</h2>
+      {description && <p style={{ margin: 0, color: theme.textSecondary, fontSize: '14px', lineHeight: '1.5' }}>{description}</p>}
+    </div>
+    {action}
+  </div>
+);
+
+const SettingCard = ({ icon, title, description, children, accent, theme }) => (
+  <div style={{ 
+    background: theme.card, 
+    padding: '24px', 
+    borderRadius: '12px', 
+    border: `1px solid ${theme.border}`,
+    transition: 'all 0.2s'
+  }}>
+    <div style={{ display: 'flex', alignItems: 'flex-start', gap: '16px', marginBottom: '20px' }}>
+      <div style={{ 
+        width: '48px', 
+        height: '48px', 
+        borderRadius: '12px', 
+        background: `${accent || theme.primary}15`,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        flexShrink: 0
+      }}>
+        {React.cloneElement(icon, { size: 24, color: accent || theme.primary })}
+      </div>
+      <div style={{ flex: 1 }}>
+        <h3 style={{ margin: '0 0 6px 0', fontSize: '16px', fontWeight: 600, color: theme.text }}>{title}</h3>
+        {description && <p style={{ margin: 0, fontSize: '13px', color: theme.textSecondary, lineHeight: '1.5' }}>{description}</p>}
+      </div>
+    </div>
+    {children}
+  </div>
+);
+
+const Toggle = ({ checked, onChange, label, theme }) => (
+  <label style={{ display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer' }}>
+    <div style={{ position: 'relative', width: '44px', height: '24px' }}>
+      <input 
+        type="checkbox" 
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        style={{ 
+          opacity: 0, 
+          width: '1px', 
+          height: '1px', 
+          position: 'absolute',
+          overflow: 'hidden',
+          clip: 'rect(0 0 0 0)',
+          margin: -1
+        }}
+      />
+      <div style={{
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        backgroundColor: checked ? theme.primary : theme.border,
+        borderRadius: '12px',
+        transition: '0.3s',
+        cursor: 'pointer'
+      }}>
+        <div style={{
+          position: 'absolute',
+          content: "",
+          height: '18px',
+          width: '18px',
+          left: checked ? '23px' : '3px',
+          bottom: '3px',
+          backgroundColor: 'white',
+          borderRadius: '50%',
+          transition: '0.3s',
+          boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
+        }} />
+      </div>
+    </div>
+    {label && <span style={{ color: theme.text, fontSize: '14px' }}>{label}</span>}
+  </label>
+);
+
+// Render helper for tabs moved outside to prevent recreation
+const RenderTabButton = ({ id, icon, label, badge, activeTab, setActiveTab, theme }) => {
+  const isActive = activeTab === id;
+  return (
+    <button
+      type="button"
+      onClick={() => setActiveTab(id)}
+      style={{
+        display: 'flex', alignItems: 'center', gap: '12px', justifyContent: 'space-between',
+        width: '100%', padding: '14px 20px',
+        border: 'none', 
+        background: isActive ? `linear-gradient(90deg, ${theme.primary}15, transparent)` : 'transparent',
+        color: isActive ? theme.primary : theme.textSecondary,
+        borderLeft: isActive ? `3px solid ${theme.primary}` : '3px solid transparent',
+        cursor: 'pointer', textAlign: 'left', transition: 'all 0.2s',
+        fontWeight: isActive ? 600 : 400,
+        fontSize: '14px'
+      }}
+      onMouseEnter={(e) => {
+        if (!isActive) e.currentTarget.style.background = theme.bgSecondary;
+      }}
+      onMouseLeave={(e) => {
+        if (!isActive) e.currentTarget.style.background = 'transparent';
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+        {icon}
+        <span>{label}</span>
+      </div>
+      {badge && (
+        <span style={{
+          background: theme.primary,
+          color: '#fff',
+          fontSize: '10px',
+          fontWeight: 700,
+          padding: '2px 6px',
+          borderRadius: '10px',
+          minWidth: '18px',
+          textAlign: 'center'
+        }}>
+          {badge}
+        </span>
+      )}
+    </button>
+  );
+};
+
 const EnhancedSettingsModal = ({ 
   isOpen, 
   onClose, 
@@ -144,7 +279,91 @@ const EnhancedSettingsModal = ({
   // Debug State
   const [debugLogs, setDebugLogs] = useState([]);
 
+  // Secrets State
+  const [secrets, setSecrets] = useState([]);
+  const [secretsLoading, setSecretsLoading] = useState(false);
+  const [newSecretData, setNewSecretData] = useState({ name: '', value: '', type: 'meraki_api_key' });
+  const [showSecretValue, setShowSecretValue] = useState({});
+
   // --- Effects ---
+
+  useEffect(() => {
+    if (isOpen && activeTab === 'secrets') {
+      fetchSecrets();
+    }
+  }, [isOpen, activeTab]);
+
+  // Secrets Handlers
+  const fetchSecrets = async () => {
+    setSecretsLoading(true);
+    try {
+      const res = await authFetch('/api/secrets');
+      if (res.ok) setSecrets(await res.json());
+      else showError('Failed to load secrets');
+    } catch (err) {
+      console.error(err);
+      showError('Failed to load secrets');
+    } finally {
+      setSecretsLoading(false);
+    }
+  };
+
+  const fetchSecretValue = async (id) => {
+    if (showSecretValue[id]) {
+      setShowSecretValue(prev => ({ ...prev, [id]: null })); // Toggle off
+      return;
+    }
+    try {
+      const res = await authFetch(`/api/secrets/${id}`);
+      if (res.ok) {
+        const data = await res.json();
+        setShowSecretValue(prev => ({ ...prev, [id]: data.value }));
+      } else {
+        showError('Failed to reveal secret');
+      }
+    } catch (err) {
+      showError('Failed to reveal secret');
+    }
+  };
+
+  const handleCreateSecret = async (e) => {
+    e.preventDefault();
+    if (!newSecretData.name || !newSecretData.value) {
+      showError('Name and Value are required');
+      return;
+    }
+    try {
+      const res = await authFetch('/api/secrets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newSecretData)
+      });
+      if (res.ok) {
+        showSuccess('Secret created');
+        setNewSecretData({ name: '', value: '', type: 'meraki_api_key' });
+        fetchSecrets();
+      } else {
+        showError('Failed to create secret');
+      }
+    } catch (err) {
+      showError('Failed to create secret');
+    }
+  };
+
+  const handleDeleteSecret = async (id) => {
+    if (!window.confirm('Delete this secret?')) return; // TODO: Use custom modal
+    try {
+      const res = await authFetch(`/api/secrets/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        showSuccess('Secret deleted');
+        fetchSecrets();
+      } else {
+        showError('Failed to delete secret');
+      }
+    } catch (err) {
+      showError('Failed to delete secret');
+    }
+  };
 
   useEffect(() => {
     if (isOpen && activeTab === 'users') {
@@ -399,51 +618,7 @@ const EnhancedSettingsModal = ({
   if (!isOpen) return null;
 
   // --- Render Helpers ---
-  
-  const renderTabButton = (id, icon, label, badge = null) => {
-    const isActive = activeTab === id;
-    return (
-      <button
-        onClick={() => setActiveTab(id)}
-        style={{
-          display: 'flex', alignItems: 'center', gap: '12px', justifyContent: 'space-between',
-          width: '100%', padding: '14px 20px',
-          border: 'none', 
-          background: isActive ? `linear-gradient(90deg, ${theme.primary}15, transparent)` : 'transparent',
-          color: isActive ? theme.primary : theme.textSecondary,
-          borderLeft: isActive ? `3px solid ${theme.primary}` : '3px solid transparent',
-          cursor: 'pointer', textAlign: 'left', transition: 'all 0.2s',
-          fontWeight: isActive ? 600 : 400,
-          fontSize: '14px'
-        }}
-        onMouseEnter={(e) => {
-          if (!isActive) e.currentTarget.style.background = theme.bgSecondary;
-        }}
-        onMouseLeave={(e) => {
-          if (!isActive) e.currentTarget.style.background = 'transparent';
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          {icon}
-          <span>{label}</span>
-        </div>
-        {badge && (
-          <span style={{
-            background: theme.primary,
-            color: '#fff',
-            fontSize: '10px',
-            fontWeight: 700,
-            padding: '2px 6px',
-            borderRadius: '10px',
-            minWidth: '18px',
-            textAlign: 'center'
-          }}>
-            {badge}
-          </span>
-        )}
-      </button>
-    );
-  };
+  // renderTabButton removed from here, using external component RenderTabButton instead
 
   const SectionHeader = ({ title, description, action }) => (
     <div style={{ marginBottom: '24px', paddingBottom: '16px', borderBottom: `1px solid ${theme.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -492,7 +667,15 @@ const EnhancedSettingsModal = ({
           type="checkbox" 
           checked={checked}
           onChange={(e) => onChange(e.target.checked)}
-          style={{ opacity: 0, width: 0, height: 0, position: 'absolute' }}
+          style={{ 
+            opacity: 0, 
+            width: '1px', 
+            height: '1px', 
+            position: 'absolute',
+            overflow: 'hidden',
+            clip: 'rect(0 0 0 0)',
+            margin: -1
+          }}
         />
         <div style={{
           position: 'absolute',
@@ -528,6 +711,7 @@ const EnhancedSettingsModal = ({
     { id: 'appearance', icon: <Palette size={20} />, label: 'Appearance' },
     { id: 'notifications', icon: <Bell size={20} />, label: 'Notifications', badge: webhooks.length || null },
     { id: 'integrations', icon: <Zap size={20} />, label: 'Integrations' },
+    { id: 'secrets', icon: <Key size={20} />, label: 'Secrets & Keys' },
     { id: 'security', icon: <Shield size={20} />, label: 'Security & API' },
     { id: 'data', icon: <Database size={20} />, label: 'Data Management' },
     { id: 'users', icon: <Users size={20} />, label: 'Users', badge: users.length || null },
@@ -543,10 +727,12 @@ const EnhancedSettingsModal = ({
       backdropFilter: 'blur(8px)',
       animation: 'fadeIn 0.2s ease'
     }}>
-      <div style={{
-        width: '95vw',
-        maxWidth: '1400px',
-        height: '90vh',
+      <div 
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: '95vw',
+          maxWidth: '1400px',
+          height: '90vh',
         background: theme.bg,
         borderRadius: '16px',
         display: 'flex',
@@ -586,7 +772,18 @@ const EnhancedSettingsModal = ({
 
           {/* Navigation */}
           <div style={{ flex: 1, overflowY: 'auto', paddingTop: '8px' }}>
-            {tabs.map(tab => renderTabButton(tab.id, tab.icon, tab.label, tab.badge))}
+            {tabs.map(tab => (
+              <RenderTabButton
+                key={tab.id}
+                id={tab.id}
+                icon={tab.icon}
+                label={tab.label}
+                badge={tab.badge}
+                activeTab={activeTab}
+                setActiveTab={setActiveTab}
+                theme={theme}
+              />
+            ))}
           </div>
 
           {/* User Info */}
@@ -632,6 +829,7 @@ const EnhancedSettingsModal = ({
           {/* Close Button */}
           <div style={{ position: 'absolute', top: '24px', right: '24px', zIndex: 1 }}>
             <button
+              type="button"
               onClick={onClose}
               style={{
                 width: '40px',
@@ -670,6 +868,7 @@ const EnhancedSettingsModal = ({
                 <SectionHeader 
                   title="General Settings" 
                   description="Configure your dashboard preferences and behavior"
+                  theme={theme}
                 />
                 
                 <div style={{ display: 'grid', gap: '20px' }}>
@@ -677,12 +876,14 @@ const EnhancedSettingsModal = ({
                     icon={<RefreshCw />}
                     title="Data Refresh"
                     description="Control how often the dashboard updates with new data"
+                    theme={theme}
                   >
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                       <Toggle 
                         checked={autoRefresh}
                         onChange={setAutoRefresh}
                         label="Enable automatic data refresh"
+                        theme={theme}
                       />
                       {autoRefresh && (
                         <div>
@@ -718,6 +919,7 @@ const EnhancedSettingsModal = ({
                     icon={<Monitor />}
                     title="Page Auto-Refresh (24/7 NOC Mode)"
                     description="Automatically refresh the entire page to prevent memory leaks during extended monitoring sessions. Preserves your current view, filters, and focus mode."
+                    theme={theme}
                   >
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                       <Toggle 
@@ -728,6 +930,7 @@ const EnhancedSettingsModal = ({
                           }
                         }}
                         label="Enable automatic page refresh"
+                        theme={theme}
                       />
                       {pageRefreshEnabled && (
                         <div>
@@ -782,12 +985,14 @@ const EnhancedSettingsModal = ({
                     icon={soundEnabled ? <Volume2 /> : <VolumeX />}
                     title="Sound Effects"
                     description="Configure audio notifications and feedback"
+                    theme={theme}
                   >
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                       <Toggle 
                         checked={soundEnabled}
                         onChange={handleSoundEnabledChange}
                         label="Enable sound effects"
+                        theme={theme}
                       />
                       {soundEnabled && (
                         <div>
@@ -817,17 +1022,20 @@ const EnhancedSettingsModal = ({
                     icon={<Sliders />}
                     title="Display Options"
                     description="Customize how information is displayed"
+                    theme={theme}
                   >
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                       <Toggle 
                         checked={compactMode}
                         onChange={setCompactMode}
                         label="Compact mode (show more data)"
+                        theme={theme}
                       />
                       <Toggle 
                         checked={animationsEnabled}
                         onChange={setAnimationsEnabled}
                         label="Enable animations"
+                        theme={theme}
                       />
                     </div>
                   </SettingCard>
@@ -841,15 +1049,18 @@ const EnhancedSettingsModal = ({
                 <SectionHeader 
                   title="Appearance" 
                   description="Customize the look and feel of your dashboard"
+                  theme={theme}
                 />
                 
                 <SettingCard
                   icon={isDark ? <Moon /> : <Sun />}
                   title="Theme"
                   description="Choose between light and dark mode"
+                  theme={theme}
                 >
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                     <button
+                      type="button"
                       onClick={() => setIsDark(false)}
                       style={{
                         padding: '24px',
@@ -869,6 +1080,7 @@ const EnhancedSettingsModal = ({
                       {!isDark && <Check size={20} color={theme.primary} />}
                     </button>
                     <button
+                      type="button"
                       onClick={() => setIsDark(true)}
                       style={{
                         padding: '24px',
@@ -898,6 +1110,7 @@ const EnhancedSettingsModal = ({
                 <SectionHeader 
                   title="Notifications" 
                   description="Manage how and when you receive alerts"
+                  theme={theme}
                 />
                 
                 <div style={{ display: 'grid', gap: '20px' }}>
@@ -905,6 +1118,7 @@ const EnhancedSettingsModal = ({
                     icon={<Bell />}
                     title="Alert Thresholds"
                     description="Set custom thresholds for triggering alerts"
+                    theme={theme}
                   >
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                       <div>
@@ -998,6 +1212,7 @@ const EnhancedSettingsModal = ({
                     icon={<Webhook />}
                     title="Webhooks"
                     description="Send alerts to external services like Slack, Discord, or custom endpoints"
+                    theme={theme}
                   >
                     <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
                       <input 
@@ -1016,6 +1231,7 @@ const EnhancedSettingsModal = ({
                         }}
                       />
                       <button 
+                        type="button"
                         onClick={handleAddWebhook} 
                         style={{ 
                           background: theme.primary, 
@@ -1051,6 +1267,7 @@ const EnhancedSettingsModal = ({
                             <Toggle 
                               checked={webhook.enabled}
                               onChange={() => handleToggleWebhook(webhook.id)}
+                              theme={theme}
                             />
                             <span style={{ 
                               color: webhook.enabled ? theme.text : theme.textSecondary, 
@@ -1064,6 +1281,7 @@ const EnhancedSettingsModal = ({
                             </span>
                           </div>
                           <button 
+                            type="button"
                             onClick={() => handleRemoveWebhook(webhook.id)} 
                             style={{ 
                               background: 'transparent', 
@@ -1102,6 +1320,7 @@ const EnhancedSettingsModal = ({
                 <SectionHeader 
                   title="Integrations" 
                   description="Connect with third-party services and tools"
+                  theme={theme}
                 />
                 
                 <div style={{ display: 'grid', gap: '20px' }}>
@@ -1112,12 +1331,14 @@ const EnhancedSettingsModal = ({
                       title={service.charAt(0).toUpperCase() + service.slice(1)}
                       description={`Send alerts and notifications to ${service}`}
                       accent={service === 'slack' ? '#4A154B' : service === 'discord' ? '#5865F2' : service === 'teams' ? '#6264A7' : '#06AC38'}
+                      theme={theme}
                     >
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                         <Toggle 
                           checked={integrations[service].enabled}
                           onChange={(checked) => handleUpdateIntegration(service, 'enabled', checked)}
                           label={`Enable ${service} integration`}
+                          theme={theme}
                         />
                         {integrations[service].enabled && (
                           <>
@@ -1143,6 +1364,7 @@ const EnhancedSettingsModal = ({
                               />
                             </div>
                             <button
+                              type="button"
                               onClick={() => handleTestIntegration(service)}
                               style={{
                                 padding: '10px 16px',
@@ -1169,23 +1391,39 @@ const EnhancedSettingsModal = ({
               </div>
             )}
 
+            {/* SECRETS & KEYS TAB */}
+            {activeTab === 'secrets' && (
+              <SecretsTab
+                secrets={secrets}
+                newSecretData={newSecretData}
+                setNewSecretData={setNewSecretData}
+                handleCreateSecret={handleCreateSecret}
+                showSecretValue={showSecretValue}
+                fetchSecretValue={fetchSecretValue}
+                handleDeleteSecret={handleDeleteSecret}
+                theme={theme}
+              />
+            )}
+
             {/* SECURITY & API TAB */}
             {activeTab === 'security' && (
               <div style={{ maxWidth: '900px' }}>
                 <SectionHeader 
                   title="Security & API Keys" 
                   description="Manage API access and security settings"
+                  theme={theme}
                 />
                 
                 <SettingCard
                   icon={<Key />}
-                  title="API Keys"
-                  description="Generate and manage API keys for programmatic access"
+                  title="App Access Tokens"
+                  description="Generate tokens for accessing THIS dashboard's API externally"
+                  theme={theme}
                 >
                   <div style={{ display: 'flex', gap: '8px', marginBottom: '20px' }}>
                     <input 
                       type="text" 
-                      placeholder="API Key Name (e.g., Production Server)" 
+                      placeholder="Token Name (e.g., CI/CD Pipeline)" 
                       value={newApiKeyName}
                       onChange={(e) => setNewApiKeyName(e.target.value)}
                       style={{ 
@@ -1199,6 +1437,7 @@ const EnhancedSettingsModal = ({
                       }}
                     />
                     <button 
+                      type="button"
                       onClick={handleGenerateApiKey} 
                       style={{ 
                         background: theme.primary, 
@@ -1236,6 +1475,7 @@ const EnhancedSettingsModal = ({
                           </div>
                           <div style={{ display: 'flex', gap: '8px' }}>
                             <button
+                              type="button"
                               onClick={() => setShowApiKey({ ...showApiKey, [key.id]: !showApiKey[key.id] })}
                               style={{
                                 background: 'transparent',
@@ -1250,6 +1490,7 @@ const EnhancedSettingsModal = ({
                               {showApiKey[key.id] ? <EyeOff size={16} /> : <Eye size={16} />}
                             </button>
                             <button
+                              type="button"
                               onClick={() => handleCopyApiKey(key.key)}
                               style={{
                                 background: 'transparent',
@@ -1264,6 +1505,7 @@ const EnhancedSettingsModal = ({
                               <Copy size={16} />
                             </button>
                             <button
+                              type="button"
                               onClick={() => handleDeleteApiKey(key.id)}
                               style={{
                                 background: 'transparent',
@@ -1313,6 +1555,7 @@ const EnhancedSettingsModal = ({
                 <SectionHeader 
                   title="Data Management" 
                   description="Import, export, and manage your monitoring data"
+                  theme={theme}
                 />
                 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '24px' }}>
@@ -1320,8 +1563,10 @@ const EnhancedSettingsModal = ({
                     icon={<Download />}
                     title="Export Data"
                     description="Download all site configurations and history"
+                    theme={theme}
                   >
                     <button 
+                      type="button"
                       onClick={handleExportSites} 
                       disabled={isExporting}
                       style={{ 
@@ -1349,6 +1594,7 @@ const EnhancedSettingsModal = ({
                     icon={<Upload />}
                     title="Import Data"
                     description="Restore sites from a JSON backup file"
+                    theme={theme}
                   >
                     <input 
                       type="file" 
@@ -1358,6 +1604,7 @@ const EnhancedSettingsModal = ({
                       onChange={handleImportFileChange}
                     />
                     <button 
+                      type="button"
                       onClick={() => fileInputRef.current.click()}
                       disabled={isImporting}
                       style={{ 
@@ -1399,6 +1646,7 @@ const EnhancedSettingsModal = ({
                   </div>
                   <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
                     <button 
+                      type="button"
                       onClick={() => setShowDeleteAllConfirm(true)}
                       style={{ 
                         padding: '12px 20px', 
@@ -1416,6 +1664,7 @@ const EnhancedSettingsModal = ({
                       <Trash2 size={16} /> Delete All Sites
                     </button>
                     <button 
+                      type="button"
                       onClick={handleClearCache}
                       style={{ 
                         padding: '12px 20px', 
@@ -1443,6 +1692,7 @@ const EnhancedSettingsModal = ({
                 <SectionHeader 
                   title="User Management" 
                   description="Manage access and permissions for dashboard users"
+                  theme={theme}
                 />
                 
                 {/* Create User */}
@@ -1450,6 +1700,7 @@ const EnhancedSettingsModal = ({
                   icon={<Plus />}
                   title="Create New User"
                   description="Add a new user to the dashboard"
+                  theme={theme}
                 >
                   <form onSubmit={handleCreateUser} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                     <div>
@@ -1619,6 +1870,7 @@ const EnhancedSettingsModal = ({
                             <td style={{ padding: '16px', textAlign: 'right' }}>
                               {u.email !== user?.email && (
                                 <button 
+                                  type="button"
                                   onClick={() => setShowDeleteUserConfirm(u)}
                                   style={{ 
                                     background: `${theme.danger}15`, 
@@ -1664,28 +1916,33 @@ const EnhancedSettingsModal = ({
                 <SectionHeader 
                   title="Advanced Settings" 
                   description="Fine-tune advanced dashboard behavior"
+                  theme={theme}
                 />
                 
                 <SettingCard
                   icon={<Code />}
                   title="Developer Options"
                   description="Advanced settings for developers and power users"
+                  theme={theme}
                 >
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                     <Toggle 
                       checked={false}
                       onChange={() => {}}
                       label="Enable debug mode"
+                      theme={theme}
                     />
                     <Toggle 
                       checked={false}
                       onChange={() => {}}
                       label="Show performance metrics"
+                      theme={theme}
                     />
                     <Toggle 
                       checked={false}
                       onChange={() => {}}
                       label="Enable experimental features"
+                      theme={theme}
                     />
                   </div>
                 </SettingCard>
@@ -1698,15 +1955,18 @@ const EnhancedSettingsModal = ({
                 <SectionHeader 
                   title="System Debug" 
                   description="Diagnostics, testing tools, and system information"
+                  theme={theme}
                 />
                 
                 <SettingCard
                   icon={<Activity />}
                   title="Connection Tests"
                   description="Test connectivity to backend services"
+                  theme={theme}
                 >
                   <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
                     <button 
+                      type="button"
                       onClick={testBackendConnection}
                       style={{ 
                         padding: '12px 20px', 
@@ -1724,6 +1984,7 @@ const EnhancedSettingsModal = ({
                       <Activity size={16} /> Test Backend
                     </button>
                     <button 
+                      type="button"
                       onClick={() => showSuccess('Test notification')}
                       style={{ 
                         padding: '12px 20px', 

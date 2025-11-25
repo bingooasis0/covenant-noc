@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { authFetch } from '../utils/api';
 import { showSuccess, showError, showLoading, dismissToast } from '../services/toast';
+import { ConfirmModal } from './noc-dashboard/modals';
 
 // -- Theme Constants --
 const THEME = {
@@ -138,6 +139,10 @@ const MerakiDashboard = ({ user, onLogout }) => {
   const [selectedDevice, setSelectedDevice] = useState(null); // For drill-down panel
   const [deviceDetails, setDeviceDetails] = useState(null); // Detailed device info
   const [loadingDeviceDetails, setLoadingDeviceDetails] = useState(false);
+  
+  // Confirm Modal State
+  const [showRebootConfirm, setShowRebootConfirm] = useState(false);
+  const [deviceToReboot, setDeviceToReboot] = useState(null);
 
   const [data, setData] = useState({
     organizations: [],
@@ -237,11 +242,12 @@ const MerakiDashboard = ({ user, onLogout }) => {
 
   // -- Actions --
 
-  const handleReboot = async (device, e) => {
-    if (e) e.stopPropagation();
-    if (!window.confirm(`Reboot ${device.name || device.serial}? This causes downtime.`)) return;
-
+  const confirmReboot = async () => {
+    if (!deviceToReboot) return;
+    
+    const device = deviceToReboot;
     const toastId = showLoading('Rebooting device...');
+    
     try {
       const res = await authFetch(`/api/meraki/device/${device.serial}/reboot`, { method: 'POST' });
       const json = await res.json();
@@ -251,7 +257,16 @@ const MerakiDashboard = ({ user, onLogout }) => {
     } catch (err) {
       dismissToast(toastId);
       showError(err.message);
+    } finally {
+        setShowRebootConfirm(false);
+        setDeviceToReboot(null);
     }
+  };
+
+  const handleReboot = (device, e) => {
+    if (e) e.stopPropagation();
+    setDeviceToReboot(device);
+    setShowRebootConfirm(true);
   };
 
   // -- Render Helpers --
@@ -712,6 +727,26 @@ const MerakiDashboard = ({ user, onLogout }) => {
             )}
           </div>
         </div>
+      )}
+
+      {showRebootConfirm && (
+        <ConfirmModal
+            title="Reboot Device?"
+            message={`Are you sure you want to reboot ${deviceToReboot?.name || deviceToReboot?.serial}? This will cause temporary downtime.`}
+            onConfirm={confirmReboot}
+            onCancel={() => {
+                setShowRebootConfirm(false);
+                setDeviceToReboot(null);
+            }}
+            theme={{
+                bg: THEME.bgCard,
+                text: THEME.text,
+                textSecondary: THEME.textDim,
+                border: THEME.border,
+                primary: THEME.accent,
+                danger: THEME.danger
+            }}
+        />
       )}
 
     </div>

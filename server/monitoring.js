@@ -45,12 +45,12 @@ async function pingHost(host, retries = 3) {
   // Mac: -c for count, -W for timeout (seconds)
   const pingConfig = isWindows 
     ? {
-        timeout: 10, // 10 seconds timeout
-        extra: ['-n', '5', '-w', '10000'] // Windows: send 5 packets, 10 second timeout per packet
+        timeout: 60, // Increase wrapper timeout to 60s to allow for packet timeouts (5 * 10s max)
+        extra: ['-n', '5', '-w', '2000'] // Windows: send 5 packets, 2 second timeout per packet (reduced from 10s to avoid super long hangs)
       }
     : {
-        timeout: 10, // 10 seconds timeout
-        extra: ['-c', '5', '-W', '10'] // Linux/Ubuntu/Mac: send 5 packets, 10 second timeout
+        timeout: 60, // 60s wrapper timeout
+        extra: ['-c', '5', '-W', '2'] // Linux/Ubuntu/Mac: send 5 packets, 2 second timeout
       };
 
   for (let attempt = 0; attempt <= retries; attempt++) {
@@ -225,16 +225,12 @@ async function monitorSite(siteId, primaryIp, failoverIp = null, snmpCommunity =
   // --- HYSTERESIS LOGIC END ---
 
   // Store monitoring data (check if site still exists first)
-  // Use a timeout to prevent database operations from blocking ping operations
+  // Local database - no timeouts, maximum performance
   try {
     // Check cache first, then database
     let siteExists = cache.get(cache.CACHE_KEYS.SITE + siteId);
     if (!siteExists) {
-    const dbOperation = Promise.race([
-      prisma.site.findUnique({ where: { id: siteId } }),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('Database timeout')), 5000))
-    ]);
-      siteExists = await dbOperation;
+      siteExists = await prisma.site.findUnique({ where: { id: siteId } });
       if (siteExists) {
         cache.set(cache.CACHE_KEYS.SITE + siteId, siteExists, cache.TTL.SITE);
       }
@@ -246,31 +242,23 @@ async function monitorSite(siteId, primaryIp, failoverIp = null, snmpCommunity =
       return null;
     }
 
-    // Check storage limits before creating (estimate ~100 bytes per record)
-    await limits.checkBeforeCreate('MonitoringData', 100);
-
-    // Use Promise.race to timeout database writes if they take too long
+    // Local database - no storage limits
     // Store latency as avg (average of 5 pings) - this is the most accurate representation
     // If avg is null but we have a single ping time, use that as fallback
     const latencyToStore = reportedMetrics.avg !== null && reportedMetrics.avg !== undefined
       ? reportedMetrics.avg
       : (reportedMetrics.time !== null && reportedMetrics.time !== undefined ? reportedMetrics.time : null);
     
-    const writeOperation = Promise.race([
-      prisma.monitoringData.create({
-        data: {
-          siteId,
-          latency: latencyToStore, // Average latency from 5 pings (or single ping fallback)
-          packetLoss: reportedMetrics.packetLoss !== null && reportedMetrics.packetLoss !== undefined 
-            ? reportedMetrics.packetLoss 
-            : (reportedMetrics.alive ? 0 : 100),
-          jitter: reportedMetrics.stddev // Standard deviation (jitter)
-        }
-      }),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('Database write timeout')), 3000))
-    ]);
-
-    await writeOperation;
+    await prisma.monitoringData.create({
+      data: {
+        siteId,
+        latency: latencyToStore, // Average latency from 5 pings (or single ping fallback)
+        packetLoss: reportedMetrics.packetLoss !== null && reportedMetrics.packetLoss !== undefined 
+          ? reportedMetrics.packetLoss 
+          : (reportedMetrics.alive ? 0 : 100),
+        jitter: reportedMetrics.stddev // Standard deviation (jitter)
+      }
+    });
     
     // Invalidate monitoring cache after successful write
     cache.invalidateMonitoring(siteId);
@@ -294,9 +282,7 @@ async function monitorSite(siteId, primaryIp, failoverIp = null, snmpCommunity =
     try {
       const snmpMetrics = await snmp.collectMetrics(activeIp, snmpCommunity);
 
-      // Check storage limits before creating (estimate ~200 bytes per record)
-      await limits.checkBeforeCreate('SnmpData', 200);
-
+      // Local database - no storage limits
       // Sanitize strings to remove null bytes
       const sanitize = (obj) => {
         if (typeof obj === 'string') return obj.replace(/\u0000/g, '');
@@ -337,22 +323,15 @@ async function monitorSite(siteId, primaryIp, failoverIp = null, snmpCommunity =
     }
   }
 
-  // Update site status (with timeout protection)
+  // Update site status (local database - no timeout)
   try {
-    const updateOperation = Promise.race([
-      prisma.site.update({
-        where: { id: siteId },
-        data: { status: reportedStatus, lastSeen: new Date() }
-      }),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('Database update timeout')), 2000))
-    ]);
-    
-    await updateOperation;
+    await prisma.site.update({
+      where: { id: siteId },
+      data: { status: reportedStatus, lastSeen: new Date() }
+    });
   } catch (err) {
     // Log but don't fail - status update is less critical than data storage
-    if (!err.message.includes('timeout')) {
-      console.warn(`[Monitor] Failed to update site status for ${siteId}:`, err.message);
-    }
+    console.warn(`[Monitor] Failed to update site status for ${siteId}:`, err.message);
   }
 
   console.log(`[Monitor] Site ${siteId} (${activeIp}): ${reportedStatus} (raw: ${status}) - ${reportedMetrics.avg}ms, ${reportedMetrics.packetLoss}% loss`);

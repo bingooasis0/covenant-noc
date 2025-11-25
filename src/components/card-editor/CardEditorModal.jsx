@@ -17,6 +17,8 @@ const CardEditorModal = ({ isOpen, onClose, theme, onSave: onSaveCallback }) => 
     const [activeDragItem, setActiveDragItem] = useState(null);
     const [loading, setLoading] = useState(false);
     const [showResetConfirm, setShowResetConfirm] = useState(false);
+    const [showTemplateConfirm, setShowTemplateConfirm] = useState(false);
+    const [templateToApply, setTemplateToApply] = useState(null);
     const [showTemplates, setShowTemplates] = useState(false);
     const [hoveredTemplate, setHoveredTemplate] = useState(null);
     const [cardConfig, setCardConfig] = useState({
@@ -193,7 +195,10 @@ const CardEditorModal = ({ isOpen, onClose, theme, onSave: onSaveCallback }) => 
 
     const handleSave = async () => {
         if (scope === 'site' && !siteId) {
-            alert('Please select a site to save this configuration for.');
+            // alert('Please select a site to save this configuration for.');
+            // Use existing showError from props or context if available, or console.error
+            // Since showSuccess/showError are not imported, let's import them or use console for now and rely on UI feedback
+            console.error('Please select a site to save this configuration for.');
             return;
         }
 
@@ -243,16 +248,27 @@ const CardEditorModal = ({ isOpen, onClose, theme, onSave: onSaveCallback }) => 
     };
 
     const applyTemplate = (template) => {
-        if (window.confirm(`Apply "${template.label}" template? This will replace your current layout.`)) {
-            // Generate new unique IDs for components
-            const newLayout = template.layout.map(c => ({
-                ...c,
-                id: `${c.type}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
-            }));
-            setComponents(newLayout);
-            setCardConfig(template.cardConfig || { height: 'auto', minHeight: 200 });
-            setShowTemplates(false);
-        }
+        // Replace window.confirm with ConfirmModal logic
+        // We reuse the reset confirmation state or add a new one
+        // For simplicity, let's reuse a new state variable for template confirmation
+        setTemplateToApply(template);
+        setShowTemplateConfirm(true);
+    };
+
+    const confirmApplyTemplate = () => {
+        if (!templateToApply) return;
+        
+        const template = templateToApply;
+        // Generate new unique IDs for components
+        const newLayout = template.layout.map(c => ({
+            ...c,
+            id: `${c.type}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+        }));
+        setComponents(newLayout);
+        setCardConfig(template.cardConfig || { height: 'auto', minHeight: 200 });
+        setShowTemplates(false);
+        setShowTemplateConfirm(false);
+        setTemplateToApply(null);
     };
 
     if (!isOpen) return null;
@@ -269,6 +285,19 @@ const CardEditorModal = ({ isOpen, onClose, theme, onSave: onSaveCallback }) => 
                     message="Are you sure you want to reset the layout to the default template? This will discard all current changes."
                     onConfirm={confirmReset}
                     onCancel={() => setShowResetConfirm(false)}
+                    theme={theme}
+                />
+            )}
+
+            {showTemplateConfirm && (
+                <ConfirmModal
+                    title="Apply Template"
+                    message={`Apply "${templateToApply?.label}" template? This will replace your current layout.`}
+                    onConfirm={confirmApplyTemplate}
+                    onCancel={() => {
+                        setShowTemplateConfirm(false);
+                        setTemplateToApply(null);
+                    }}
                     theme={theme}
                 />
             )}

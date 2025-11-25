@@ -1,9 +1,20 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Activity, Terminal, Settings, Clock, Save, Play, Wifi, AlertTriangle } from 'lucide-react';
-import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
+import { X, Activity, Terminal, Settings, Clock, Save, Play, Wifi, AlertTriangle, CheckCircle, Network } from 'lucide-react';
+import { 
+  AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
+  ComposedChart, Line, BarChart, Bar, Legend
+} from 'recharts';
 import { authFetch } from '../utils/api';
 import { ConfirmModal } from './noc-dashboard/modals';
 import { showSuccess, showError } from '../services/toast';
+import { 
+  formatRelativeTime, 
+  formatLatency, 
+  ensureArray, 
+  withAlpha,
+  LATENCY_GOOD_THRESHOLD_MS,
+  LATENCY_WARN_THRESHOLD_MS 
+} from './noc-dashboard/utils';
 
 const THEME = {
   bg: '#050505',
@@ -192,7 +203,7 @@ const SlideOver = ({ site, onClose, isOpen, onUpdateSite }) => {
 
         {/* Tabs */}
         <div style={{ display: 'flex', borderBottom: `1px solid ${THEME.border}` }}>
-          {['overview', 'tools', 'settings'].map(tab => (
+          {['overview', 'telemetry', 'tools', 'settings'].map(tab => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -237,6 +248,22 @@ const SlideOver = ({ site, onClose, isOpen, onUpdateSite }) => {
                 </div>
               </div>
 
+              {/* Quick Stats */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                <div style={{ background: 'rgba(255,255,255,0.03)', padding: '16px', borderRadius: '8px', border: `1px solid ${THEME.border}` }}>
+                  <div style={{ color: THEME.textDim, fontSize: '12px', marginBottom: '4px' }}>LATENCY</div>
+                  <div style={{ fontSize: '18px', fontWeight: 600, color: THEME.text }}>
+                    {localMetrics?.latency ? formatLatency(localMetrics.latency) : '-'}
+                  </div>
+                </div>
+                <div style={{ background: 'rgba(255,255,255,0.03)', padding: '16px', borderRadius: '8px', border: `1px solid ${THEME.border}` }}>
+                  <div style={{ color: THEME.textDim, fontSize: '12px', marginBottom: '4px' }}>PACKET LOSS</div>
+                  <div style={{ fontSize: '18px', fontWeight: 600, color: (localMetrics?.packetLoss || 0) > 0 ? THEME.danger : THEME.success }}>
+                    {localMetrics?.packetLoss ? `${localMetrics.packetLoss}%` : '0%'}
+                  </div>
+                </div>
+              </div>
+
               {/* Detailed Graph */}
               <div style={{ height: '300px' }}>
                  <h3 style={{ color: THEME.text, fontSize: '14px', marginBottom: '12px' }}>24h Latency Performance</h3>
@@ -263,6 +290,138 @@ const SlideOver = ({ site, onClose, isOpen, onUpdateSite }) => {
                      <Area type="monotone" dataKey="latency" stroke={THEME.accent} fillOpacity={1} fill="url(#colorLat)" />
                    </AreaChart>
                  </ResponsiveContainer>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'telemetry' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+              {/* Diagnostic Summary */}
+              <div style={{
+                padding: '16px',
+                background: 'rgba(255,255,255,0.03)',
+                borderRadius: '8px',
+                borderLeft: `4px solid ${statusColor}`
+              }}>
+                <h3 style={{ margin: '0 0 8px 0', fontSize: '16px', color: THEME.text }}>Diagnostic Assessment</h3>
+                <div style={{ fontSize: '13px', color: THEME.textDim, lineHeight: '1.5' }}>
+                  {(localMetrics?.packetLoss || 0) > 0 ? (
+                    <div style={{ marginBottom: '8px', color: THEME.warning }}>
+                      <AlertTriangle size={14} style={{ display: 'inline', marginRight: '6px', verticalAlign: 'text-bottom' }} />
+                      <strong>Packet Loss Detected:</strong> {(localMetrics?.packetLoss || 0).toFixed(1)}% loss is occurring. This indicates network congestion, physical layer errors, or ISP issues.
+                    </div>
+                  ) : (
+                    <div style={{ marginBottom: '8px', color: THEME.success }}>
+                      <CheckCircle size={14} style={{ display: 'inline', marginRight: '6px', verticalAlign: 'text-bottom' }} />
+                      <strong>Reachability:</strong> Site is fully reachable with 0% packet loss.
+                    </div>
+                  )}
+                  {(localMetrics?.jitter || 0) > 20 && (
+                    <div style={{ marginBottom: '8px', color: THEME.warning }}>
+                      <Activity size={14} style={{ display: 'inline', marginRight: '6px', verticalAlign: 'text-bottom' }} />
+                      <strong>High Jitter:</strong> {(localMetrics?.jitter || 0).toFixed(1)}ms variation detected. This may cause voice/video quality issues.
+                    </div>
+                  )}
+                  <div>
+                    <strong>Analysis:</strong> Monitoring {site?.failoverIp ? 'Primary/Failover' : 'Primary'} path. 
+                    Last check was {formatRelativeTime(localMetrics?.timestamp || new Date())}.
+                  </div>
+                </div>
+              </div>
+
+              {/* Latency & Jitter Chart */}
+              <div style={{ background: 'rgba(255,255,255,0.03)', padding: '16px', borderRadius: '12px', border: `1px solid ${THEME.border}` }}>
+                <h4 style={{ margin: '0 0 16px 0', fontSize: '14px', color: THEME.textDim }}>Latency & Jitter (Last 60 Points)</h4>
+                <div style={{ height: '250px', width: '100%' }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <ComposedChart data={ensureArray(history).slice(-60)}>
+                      <CartesianGrid strokeDasharray="3 3" stroke={THEME.border} vertical={false} />
+                      <XAxis dataKey="timestamp" hide />
+                      <YAxis yAxisId="left" stroke={THEME.textDim} fontSize={10} unit="ms" />
+                      <Tooltip
+                        contentStyle={{ backgroundColor: THEME.panelBg, border: `1px solid ${THEME.border}`, color: THEME.text }}
+                        labelStyle={{ color: THEME.textDim }}
+                        labelFormatter={(t) => new Date(t).toLocaleTimeString()}
+                      />
+                      <Legend />
+                      <Area yAxisId="left" type="monotone" dataKey="jitter" fill={withAlpha(THEME.warning, 0.2)} stroke={THEME.warning} name="Jitter" />
+                      <Line yAxisId="left" type="monotone" dataKey="latency" stroke={THEME.accent} dot={false} strokeWidth={2} name="Latency" />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+              {/* Packet Loss Chart */}
+              <div style={{ background: 'rgba(255,255,255,0.03)', padding: '16px', borderRadius: '12px', border: `1px solid ${THEME.border}` }}>
+                <h4 style={{ margin: '0 0 16px 0', fontSize: '14px', color: THEME.textDim }}>Packet Loss Events</h4>
+                <div style={{ height: '150px', width: '100%' }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={ensureArray(history).slice(-60)}>
+                      <CartesianGrid strokeDasharray="3 3" stroke={THEME.border} vertical={false} />
+                      <XAxis dataKey="timestamp" hide />
+                      <YAxis stroke={THEME.textDim} fontSize={10} domain={[0, 100]} unit="%" />
+                      <Tooltip
+                        contentStyle={{ backgroundColor: THEME.panelBg, border: `1px solid ${THEME.border}`, color: THEME.text }}
+                        labelStyle={{ color: THEME.textDim }}
+                        labelFormatter={(t) => new Date(t).toLocaleTimeString()}
+                        cursor={{ fill: 'rgba(255,255,255,0.05)' }}
+                      />
+                      <Bar dataKey="packetLoss" fill={THEME.danger} name="Loss %" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+
+              {/* Ping Log Table */}
+              <div style={{ background: 'rgba(255,255,255,0.03)', borderRadius: '12px', border: `1px solid ${THEME.border}`, overflow: 'hidden' }}>
+                <div style={{ padding: '12px 16px', borderBottom: `1px solid ${THEME.border}`, background: 'rgba(255,255,255,0.05)' }}>
+                  <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 600, color: THEME.text }}>Event Log</h4>
+                </div>
+                <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px', color: THEME.textDim }}>
+                    <thead style={{ background: 'rgba(0,0,0,0.2)', position: 'sticky', top: 0 }}>
+                      <tr>
+                        <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600 }}>Time</th>
+                        <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600 }}>Status</th>
+                        <th style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 600 }}>Latency</th>
+                        <th style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 600 }}>Jitter</th>
+                        <th style={{ padding: '10px 16px', textAlign: 'right', fontWeight: 600 }}>Loss</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {ensureArray(history).slice().reverse().map((log, i) => (
+                        <tr key={i} style={{ borderBottom: `1px solid ${THEME.border}` }}>
+                          <td style={{ padding: '8px 16px', fontFamily: 'monospace' }}>
+                            {new Date(log.timestamp).toLocaleTimeString()}
+                          </td>
+                          <td style={{ padding: '8px 16px' }}>
+                            {(log.packetLoss || 0) >= 100 ? (
+                              <span style={{ color: THEME.danger, fontWeight: 600 }}>DOWN</span>
+                            ) : (log.packetLoss || 0) > 0 ? (
+                              <span style={{ color: THEME.warning, fontWeight: 600 }}>UNSTABLE</span>
+                            ) : (
+                              <span style={{ color: THEME.success }}>UP</span>
+                            )}
+                          </td>
+                          <td style={{ padding: '8px 16px', textAlign: 'right', fontFamily: 'monospace', color: THEME.text }}>
+                            {log.latency !== null ? `${Math.round(log.latency)}ms` : '-'}
+                          </td>
+                          <td style={{ padding: '8px 16px', textAlign: 'right', fontFamily: 'monospace' }}>
+                            {log.jitter !== null ? `${Math.round(log.jitter)}ms` : '-'}
+                          </td>
+                          <td style={{ padding: '8px 16px', textAlign: 'right', fontFamily: 'monospace' }}>
+                            <span style={{ 
+                              color: (log.packetLoss || 0) > 0 ? THEME.danger : THEME.success,
+                              fontWeight: (log.packetLoss || 0) > 0 ? 600 : 400 
+                            }}>
+                              {log.packetLoss}%
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           )}

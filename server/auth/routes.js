@@ -43,9 +43,7 @@ router.post('/register', async (req, res) => {
     // Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Check storage limits before creating user (~500 bytes)
-    await limits.checkBeforeCreate('User', 500);
-
+    // Local database - no storage limits
     // Create user
     const user = await prisma.user.create({
       data: {
@@ -67,8 +65,7 @@ router.post('/register', async (req, res) => {
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + 7); // 7 days
 
-    // Check storage limits before creating token (~200 bytes)
-    await limits.checkBeforeCreate('RefreshToken', 200);
+    // Local database - no storage limits
 
     await prisma.refreshToken.create({
       data: {
@@ -78,8 +75,7 @@ router.post('/register', async (req, res) => {
       }
     });
 
-    // Log audit entry (check limits first)
-    await limits.checkBeforeCreate('AuditLog', 300);
+    // Local database - no limits
     await prisma.auditLog.create({
       data: {
         userId: user.id,
@@ -159,8 +155,7 @@ router.post('/login', async (req, res) => {
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + 7); // 7 days
 
-    // Check storage limits before creating token (~200 bytes)
-    await limits.checkBeforeCreate('RefreshToken', 200);
+    // Local database - no storage limits
 
     await prisma.refreshToken.create({
       data: {
@@ -170,8 +165,7 @@ router.post('/login', async (req, res) => {
       }
     });
 
-    // Log audit entry (check limits first)
-    await limits.checkBeforeCreate('AuditLog', 300);
+    // Local database - no limits
     await prisma.auditLog.create({
       data: {
         userId: user.id,
@@ -253,8 +247,7 @@ router.post('/refresh', async (req, res) => {
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + 7);
 
-    // Check storage limits before creating token (~200 bytes)
-    await limits.checkBeforeCreate('RefreshToken', 200);
+    // Local database - no storage limits
 
     await prisma.refreshToken.create({
       data: {
@@ -300,8 +293,7 @@ router.post('/logout', requireAuth, async (req, res) => {
       });
     }
 
-    // Log audit entry (check limits first)
-    await limits.checkBeforeCreate('AuditLog', 300);
+    // Local database - no limits
     await prisma.auditLog.create({
       data: {
         userId: req.user.userId,

@@ -28,7 +28,7 @@ const getToastStyles = (isDark = true) => ({
     secondary: isDark ? '#13161c' : '#ffffff',
   },
   duration: 4000,
-  position: 'top-right',
+  position: 'top-center',
 });
 
 // Success notification (green, auto-dismiss)

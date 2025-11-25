@@ -139,7 +139,29 @@ function App() {
 
   return (
     <>
-      <Toaster position="top-center" />
+      <Toaster
+        position="top-center"
+        toastOptions={{
+          className: '',
+          style: {
+            background: '#333',
+            color: '#fff',
+          },
+          success: {
+            duration: 3000,
+            theme: {
+              primary: '#4aed88',
+              secondary: 'black',
+            },
+          },
+          // Custom animations
+          enter: 'transform transition-all duration-300 ease-out translate-y-0 opacity-100 scale-100',
+          exit: 'transform transition-all duration-200 ease-in -translate-y-2 opacity-0 scale-95',
+        }}
+        containerStyle={{
+          top: 20,
+        }}
+      />
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route

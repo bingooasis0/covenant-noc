@@ -149,10 +149,13 @@ function invalidateSites() {
 
 /**
  * Invalidate monitoring data cache for a site
+ * Only invalidates LATEST data, not history, to prevent cache thrashing
  */
 function invalidateMonitoring(siteId) {
   del(CACHE_KEYS.MONITORING_LATEST + siteId);
-  delPattern(CACHE_KEYS.MONITORING_HISTORY + siteId);
+  // Intentionally NOT invalidating history here. 
+  // History queries are expensive and don't need to reflect the very latest second immediately.
+  // They will expire naturally based on TTL (30s).
 }
 
 /**

@@ -117,3 +117,12 @@ model CardConfiguration {
 
   @@unique([userId, scope, targetId, viewType])
 }
+
+model Secret {
+  id        String   @id @default(uuid())
+  name      String
+  value     String
+  type      String   @default("meraki_api_key") // meraki_api_key, snmp_community, etc.
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

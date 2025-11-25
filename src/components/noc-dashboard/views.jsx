@@ -630,6 +630,7 @@ export const GridView = ({
                   const cardConfig = siteLayoutData?.cardConfig || {};
                   
                   // Debugging for Main Office
+                  /* 
                   if (site.name === 'Main Office') {
                     console.log('[GridView] Main Office Layout Check:', { 
                       siteId: site.id,
@@ -641,6 +642,7 @@ export const GridView = ({
                       cardConfig
                     });
                   }
+                  */
 
                   // Use NOCCard if custom layout exists, otherwise use DetailedGridCard
                   if (siteLayout && Array.isArray(siteLayout) && siteLayout.length > 0) {

@@ -14,6 +14,7 @@ const authRoutes = require('./auth/routes');
 const merakiRoutes = require('./routes/meraki');
 const toolsRoutes = require('./routes/tools');
 const cardConfigRoutes = require('./routes/card-config');
+const secretsRoutes = require('./routes/secrets');
 const { requireAuth } = require('./auth/middleware');
 const monitoring = require('./monitoring');
 const limits = require('./limits');
@@ -21,10 +22,26 @@ const cache = require('./cache');
 const app = express();
 const server = http.createServer(app);
 
+// Determine CORS origin configuration
+const isProduction = process.env.NODE_ENV === 'production';
+let corsOrigin;
+
+if (process.env.CLIENT_URL) {
+  // Explicit CLIENT_URL set - use it
+  corsOrigin = process.env.CLIENT_URL;
+} else if (isProduction) {
+  // Production without CLIENT_URL - allow all origins (with warning)
+  console.warn('⚠️  WARNING: CLIENT_URL not set in production. Allowing all origins.');
+  corsOrigin = true; // Allow all origins
+} else {
+  // Development default
+  corsOrigin = 'http://localhost:3001';
+}
+
 // Setup Socket.io
 const io = new Server(server, {
   cors: {
-    origin: process.env.CLIENT_URL || 'http://localhost:3001',
+    origin: corsOrigin === true ? '*' : corsOrigin,
     methods: ['GET', 'POST'],
     credentials: true
   }
@@ -50,7 +67,7 @@ app.use(helmet({
 }));
 
 app.use(cors({
-  origin: process.env.CLIENT_URL || 'http://localhost:3001',
+  origin: corsOrigin,
   credentials: true
 }));
 
@@ -58,10 +75,10 @@ app.use(compression()); // Enable gzip compression for performance
 app.use(express.json({ limit: '10mb' }));
 app.use(cookieParser());
 
-// Rate limiting
+// Rate limiting - disabled for local database (unlimited)
 const apiLimiter = rateLimit({
   windowMs: 1 * 60 * 1000, // 1 minute
-  max: 1000 // 1000 requests per minute (increased for monitoring)
+  max: 100000 // Effectively unlimited for local database
 });
 
 // Auth routes (register, login, refresh, logout)
@@ -75,6 +92,9 @@ app.use('/api/tools', toolsRoutes);
 
 // Card Configuration routes
 app.use('/api/card-config', requireAuth, cardConfigRoutes);
+
+// Secrets & Keys routes
+app.use('/api/secrets', requireAuth, secretsRoutes);
 
 // ============ HEALTH CHECK ============
 app.get('/api/health', (req, res) => {
@@ -165,9 +185,7 @@ app.post('/api/sites', requireAuth, async (req, res) => {
   try {
     const d = req.body;
 
-    // Check storage limits before creating (estimate ~800 bytes per site)
-    await limits.checkBeforeCreate('Site', 800);
-
+    // Local database - no storage limits
     const site = await prisma.site.create({
       data: {
         name: d.name, customer: d.customer, location: d.location, ip: d.ip,
@@ -182,8 +200,7 @@ app.post('/api/sites', requireAuth, async (req, res) => {
     });
     if (site.monitoringIcmp) monitoring.startMonitoring(site.id, site.ip, site.failoverIp, site.monitoringSnmp ? site.snmpCommunity : null, site.monitoringInterval);
 
-    // Check limits before creating audit log (~300 bytes)
-    await limits.checkBeforeCreate('AuditLog', 300);
+    // Local database - no limits
     await prisma.auditLog.create({ data: { userId: req.user.userId, action: 'site_created', details: { siteId: site.id, siteName: site.name } } });
     res.json(site);
   } catch (error) {
@@ -377,9 +394,7 @@ app.post('/api/sites/import', requireAuth, async (req, res) => {
           summary.updated += 1;
           restartQueue.push({ id: targetId, ip, failoverIp: siteData.failoverIp, monitoringIcmp: siteData.monitoringIcmp, monitoringSnmp: siteData.monitoringSnmp, snmpCommunity: siteData.snmpCommunity });
         } else {
-          // Check storage limits before creating (estimate ~800 bytes per site)
-          await limits.checkBeforeCreate('Site', 800);
-
+          // Local database - no storage limits
           const newSite = await prisma.site.create({ data: siteData });
           summary.created += 1;
           restartQueue.push({ id: newSite.id, ip, failoverIp: siteData.failoverIp, monitoringIcmp: siteData.monitoringIcmp, monitoringSnmp: siteData.monitoringSnmp, snmpCommunity: siteData.snmpCommunity });
@@ -438,18 +453,30 @@ app.get('/api/monitoring/:siteId', requireAuth, async (req, res) => {
 app.get('/api/monitoring/:siteId/history', requireAuth, async (req, res) => {
   try {
     const hours = parseInt(req.query.hours) || 24;
-    const since = new Date();
-    since.setHours(since.getHours() - hours);
     
     // Cache history with hours as part of key
+    // Increase TTL for history to reducing load
     const cacheKey = `${cache.CACHE_KEYS.MONITORING_HISTORY}${req.params.siteId}:${hours}`;
     const history = await cache.getOrSet(
       cacheKey,
-      cache.TTL.MONITORING_HISTORY,
-      () => prisma.monitoringData.findMany({ 
-        where: { siteId: req.params.siteId, timestamp: { gte: since } }, 
-        orderBy: { timestamp: 'asc' } 
-      })
+      60, // 60 seconds cache for history
+      async () => {
+        const since = new Date();
+        since.setHours(since.getHours() - hours);
+        
+        // Fetch raw data
+        const data = await prisma.monitoringData.findMany({ 
+          where: { siteId: req.params.siteId, timestamp: { gte: since } }, 
+          orderBy: { timestamp: 'asc' } 
+        });
+
+        // Downsample if data points > 500 to reduce payload size
+        if (data.length > 500) {
+          const factor = Math.ceil(data.length / 500);
+          return data.filter((_, i) => i % factor === 0);
+        }
+        return data;
+      }
     );
     res.json(history);
   } catch (error) {
@@ -523,10 +550,7 @@ app.get('/api/presets', requireAuth, async (req, res) => {
 
 app.post('/api/presets', requireAuth, async (req, res) => {
   try {
-    // Estimate size based on config size (rough estimate: 500 bytes base + config size)
-    const configSize = JSON.stringify(req.body.config || {}).length;
-    await limits.checkBeforeCreate('Preset', 500 + configSize);
-
+    // Local database - no storage limits
     const preset = await prisma.preset.create({ data: { name: req.body.name, config: req.body.config } });
     
     // Invalidate presets cache
@@ -577,10 +601,7 @@ app.get('/api/audit', requireAuth, async (req, res) => {
 
 app.post('/api/audit', requireAuth, async (req, res) => {
   try {
-    // Estimate size based on details size (~300 bytes base + details size)
-    const detailsSize = JSON.stringify(req.body.details || {}).length;
-    await limits.checkBeforeCreate('AuditLog', 300 + detailsSize);
-
+    // Local database - no storage limits
     const log = await prisma.auditLog.create({ data: { userId: req.user.userId, action: req.body.action, details: req.body.details || {} } });
     res.json(log);
   } catch (error) {
@@ -633,9 +654,7 @@ app.post('/api/users', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'Email already exists' });
     }
 
-    // Check storage limits before creating user (~500 bytes)
-    await limits.checkBeforeCreate('User', 500);
-
+    // Local database - no storage limits
     const bcrypt = require('bcrypt');
     const hashedPassword = await bcrypt.hash(password, 12);
 
@@ -657,8 +676,7 @@ app.post('/api/users', requireAuth, async (req, res) => {
       }
     });
 
-    // Check limits before creating audit log
-    await limits.checkBeforeCreate('AuditLog', 300);
+    // Local database - no limits
     await prisma.auditLog.create({ data: { userId: req.user.userId, action: 'user_created', details: { userId: user.id, email: user.email } } });
     res.json(user);
   } catch (error) {

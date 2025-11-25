@@ -19,7 +19,8 @@ import {
   CheckCircle,
   XCircle,
   Loader,
-  Info
+  Info,
+  Network
 } from 'lucide-react';
 import {
   formatBytes,
@@ -38,10 +39,17 @@ import LoadingBar from './LoadingBar';
 import {
   LineChart,
   Line,
+  BarChart,
+  Bar,
+  AreaChart,
+  Area,
+  ComposedChart,
   XAxis,
   YAxis,
   Tooltip as RechartsTooltip,
-  ResponsiveContainer
+  ResponsiveContainer,
+  CartesianGrid,
+  Legend
 } from 'recharts';
 import Tooltip from '../Tooltip';
 import {
@@ -467,6 +475,162 @@ const SiteDetailModal = ({ site, metrics, history, snmp, api, alerts, onClose, o
     </div>
   );
 
+  const renderTelemetry = () => {
+    const pingLog = ensureArray(history)
+      .slice()
+      .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+    const chartData = ensureArray(history)
+      .map(point => ({
+        time: new Date(point.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        latency: point.latency,
+        jitter: point.jitter,
+        packetLoss: point.packetLoss,
+        fullTime: point.timestamp
+      }))
+      .slice(-60); // Last 60 points
+
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+        {/* Diagnostic Summary */}
+        <div style={{
+          padding: '16px',
+          background: theme.bgSecondary,
+          borderRadius: '8px',
+          borderLeft: `4px solid ${statusColor}`
+        }}>
+          <h3 style={{ margin: '0 0 8px 0', fontSize: '16px', color: theme.text }}>Diagnostic Assessment</h3>
+          <div style={{ fontSize: '13px', color: theme.textSecondary, lineHeight: '1.5' }}>
+            {metrics?.packetLoss > 0 ? (
+              <div style={{ marginBottom: '8px', color: theme.warning }}>
+                <AlertTriangle size={14} style={{ display: 'inline', marginRight: '6px', verticalAlign: 'text-bottom' }} />
+                <strong>Packet Loss Detected:</strong> {metrics.packetLoss.toFixed(1)}% loss is occurring. This indicates network congestion, physical layer errors, or ISP issues.
+              </div>
+            ) : (
+              <div style={{ marginBottom: '8px', color: theme.success }}>
+                <CheckCircle size={14} style={{ display: 'inline', marginRight: '6px', verticalAlign: 'text-bottom' }} />
+                <strong>Reachability:</strong> Site is fully reachable with 0% packet loss.
+              </div>
+            )}
+            {metrics?.jitter > 20 && (
+              <div style={{ marginBottom: '8px', color: theme.warning }}>
+                <Activity size={14} style={{ display: 'inline', marginRight: '6px', verticalAlign: 'text-bottom' }} />
+                <strong>High Jitter:</strong> {metrics.jitter.toFixed(1)}ms variation detected. This may cause voice/video quality issues.
+              </div>
+            )}
+            <div>
+              <strong>Analysis:</strong> Monitoring {metrics?.usingFailover ? 'Secondary/Failover' : 'Primary'} path. 
+              Last check was {formatRelativeTime(metrics?.timestamp || new Date())}.
+            </div>
+          </div>
+        </div>
+
+        {/* Telemetry Charts */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '20px' }}>
+          
+          {/* Latency & Jitter Chart */}
+          <div style={{ background: theme.card, padding: '16px', borderRadius: '12px', border: `1px solid ${theme.border}` }}>
+            <h4 style={{ margin: '0 0 16px 0', fontSize: '14px', color: theme.textMuted }}>Latency & Jitter (Last Hour)</h4>
+            <div style={{ height: '250px', width: '100%' }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <ComposedChart data={chartData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={theme.borderLight} vertical={false} />
+                  <XAxis dataKey="time" hide />
+                  <YAxis yAxisId="left" stroke={theme.textMuted} fontSize={10} unit="ms" />
+                  <RechartsTooltip
+                    contentStyle={{ backgroundColor: theme.bgSecondary, border: `1px solid ${theme.border}` }}
+                    labelStyle={{ color: theme.textSecondary }}
+                  />
+                  <Legend />
+                  <Area yAxisId="left" type="monotone" dataKey="jitter" fill={withAlpha(theme.warning, 0.2)} stroke={theme.warning} name="Jitter" />
+                  <Line yAxisId="left" type="monotone" dataKey="latency" stroke={theme.primary} dot={false} strokeWidth={2} name="Latency" />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          {/* Packet Loss Chart */}
+          <div style={{ background: theme.card, padding: '16px', borderRadius: '12px', border: `1px solid ${theme.border}` }}>
+            <h4 style={{ margin: '0 0 16px 0', fontSize: '14px', color: theme.textMuted }}>Packet Loss Events</h4>
+            <div style={{ height: '150px', width: '100%' }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={chartData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke={theme.borderLight} vertical={false} />
+                  <XAxis dataKey="time" hide />
+                  <YAxis stroke={theme.textMuted} fontSize={10} domain={[0, 100]} unit="%" />
+                  <RechartsTooltip
+                    contentStyle={{ backgroundColor: theme.bgSecondary, border: `1px solid ${theme.border}` }}
+                    labelStyle={{ color: theme.textSecondary }}
+                    cursor={{ fill: theme.bgSecondary }}
+                  />
+                  <Bar dataKey="packetLoss" fill={theme.danger} name="Loss %" />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        </div>
+
+        {/* Ping Log Table */}
+        <div style={{ background: theme.card, borderRadius: '12px', border: `1px solid ${theme.border}`, overflow: 'hidden' }}>
+          <div style={{ padding: '12px 16px', borderBottom: `1px solid ${theme.border}`, background: theme.bgSecondary }}>
+            <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 600 }}>Event Log</h4>
+          </div>
+          <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
+              <thead style={{ background: theme.bgSecondary, position: 'sticky', top: 0 }}>
+                <tr>
+                  <th style={{ padding: '10px 16px', textAlign: 'left', color: theme.textMuted, fontWeight: 600 }}>Time</th>
+                  <th style={{ padding: '10px 16px', textAlign: 'left', color: theme.textMuted, fontWeight: 600 }}>Status</th>
+                  <th style={{ padding: '10px 16px', textAlign: 'right', color: theme.textMuted, fontWeight: 600 }}>Latency</th>
+                  <th style={{ padding: '10px 16px', textAlign: 'right', color: theme.textMuted, fontWeight: 600 }}>Jitter</th>
+                  <th style={{ padding: '10px 16px', textAlign: 'right', color: theme.textMuted, fontWeight: 600 }}>Loss</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pingLog.length > 0 ? pingLog.map((log, i) => (
+                  <tr key={i} style={{ borderBottom: `1px solid ${theme.borderLight}` }}>
+                    <td style={{ padding: '8px 16px', color: theme.textSecondary, fontFamily: 'monospace' }}>
+                      {new Date(log.timestamp).toLocaleTimeString()}
+                    </td>
+                    <td style={{ padding: '8px 16px' }}>
+                      {log.packetLoss >= 100 ? (
+                        <span style={{ color: theme.danger, fontWeight: 600 }}>DOWN</span>
+                      ) : log.packetLoss > 0 ? (
+                        <span style={{ color: theme.warning, fontWeight: 600 }}>UNSTABLE</span>
+                      ) : (
+                        <span style={{ color: theme.success }}>UP</span>
+                      )}
+                    </td>
+                    <td style={{ padding: '8px 16px', textAlign: 'right', fontFamily: 'monospace', color: theme.text }}>
+                      {log.latency ? `${Math.round(log.latency)}ms` : '-'}
+                    </td>
+                    <td style={{ padding: '8px 16px', textAlign: 'right', fontFamily: 'monospace', color: theme.textSecondary }}>
+                      {log.jitter ? `${Math.round(log.jitter)}ms` : '-'}
+                    </td>
+                    <td style={{ padding: '8px 16px', textAlign: 'right', fontFamily: 'monospace' }}>
+                      <span style={{ 
+                        color: log.packetLoss > 0 ? theme.danger : theme.success,
+                        fontWeight: log.packetLoss > 0 ? 600 : 400 
+                      }}>
+                        {log.packetLoss}%
+                      </span>
+                    </td>
+                  </tr>
+                )) : (
+                  <tr>
+                    <td colSpan={5} style={{ padding: '24px', textAlign: 'center', color: theme.textMuted }}>
+                      No log data available.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const renderAlerts = () => (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
       {alerts.length > 0 ? alerts.map(alert => (
@@ -532,6 +696,10 @@ const SiteDetailModal = ({ site, metrics, history, snmp, api, alerts, onClose, o
         content = renderApi();
         showLoading = !hasApiData && apiLoading;
         break;
+      case 'telemetry':
+        content = renderTelemetry();
+        showLoading = !hasHistoryData && historyLoading;
+        break;
       case 'alerts':
         content = renderAlerts();
         showLoading = false;
@@ -570,7 +738,7 @@ const SiteDetailModal = ({ site, metrics, history, snmp, api, alerts, onClose, o
     );
   };
 
-  const tabs = ['overview', 'icmp', 'snmp', 'api', 'alerts'];
+  const tabs = ['overview', 'telemetry', 'icmp', 'snmp', 'api', 'alerts'];
 
   return (
     <div
@@ -841,7 +1009,7 @@ const SiteDetailModal = ({ site, metrics, history, snmp, api, alerts, onClose, o
 };
 
 // Add/Edit Site Modal
-const AddEditSiteModal = ({ site, onClose, onSave, theme }) => {
+const AddEditSiteModal = React.memo(({ site, onClose, onSave, theme, isOpen = true }) => {
   const [formData, setFormData] = useState(() => {
     const defaults = {
       customer: '',
@@ -896,6 +1064,41 @@ const AddEditSiteModal = ({ site, onClose, onSave, theme }) => {
   const [geocodeResult, setGeocodeResult] = useState(null);
   const [geocodeLoading, setGeocodeLoading] = useState(false);
   const [geocodeError, setGeocodeError] = useState(null);
+  
+  // Secrets state
+  const [secrets, setSecrets] = useState([]);
+  const [showSecretSelect, setShowSecretSelect] = useState(false);
+
+  useEffect(() => {
+    const fetchSecrets = async () => {
+      try {
+        const res = await authFetch('/api/secrets');
+        if (res.ok) {
+          const data = await res.json();
+          setSecrets(data.filter(s => s.type === 'meraki_api_key'));
+        }
+      } catch (err) {
+        console.error('Failed to load secrets', err);
+      }
+    };
+    if (isOpen) {
+        fetchSecrets();
+    }
+  }, [isOpen]);
+
+  const handleSecretSelect = async (secretId) => {
+    try {
+      const res = await authFetch(`/api/secrets/${secretId}`);
+      if (res.ok) {
+        const data = await res.json();
+        setFormData(prev => ({ ...prev, api_key: data.value }));
+        setShowSecretSelect(false);
+        showSuccess('API Key applied from secrets');
+      }
+    } catch (err) {
+      showError('Failed to retrieve secret value');
+    }
+  };
 
   const checkAddress = async () => {
     if (!formData.location) {
@@ -1304,19 +1507,81 @@ const AddEditSiteModal = ({ site, onClose, onSave, theme }) => {
               <div style={{ fontSize: '12px', color: theme.textSecondary, marginLeft: '26px', marginBottom: '12px' }}>
                 Cisco Meraki dashboard integration
               </div>
-              {formData.monitoring_meraki && (
+                  {formData.monitoring_meraki && (
                 <div style={{ marginLeft: '26px', display: 'grid', gap: '12px' }}>
                   <div>
                     <Tooltip content="API key from Meraki Dashboard for monitoring device status, uplink, and traffic" position="top" isDark={theme.bg === '#0a0e14'}>
                       <label style={{ display: 'block', fontSize: '12px', marginBottom: '6px', color: theme.textSecondary, cursor: 'help' }}>Meraki API Key *</label>
                     </Tooltip>
-                    <input
-                      type="text"
-                      value={formData.api_key || ''}
-                      onChange={(e) => setFormData({ ...formData, api_key: e.target.value })}
-                      style={inputStyle}
-                      placeholder="Your Meraki API key"
-                    />
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                        <input
+                        type="text"
+                        value={formData.api_key || ''}
+                        onChange={(e) => setFormData({ ...formData, api_key: e.target.value })}
+                        style={{ ...inputStyle, flex: 1 }}
+                        placeholder="Your Meraki API key"
+                        />
+                        {secrets.length > 0 && (
+                            <div style={{ position: 'relative' }}>
+                                <button
+                                    type="button"
+                                    onClick={() => setShowSecretSelect(!showSecretSelect)}
+                                    style={{
+                                        padding: '8px 12px',
+                                        background: theme.bgSecondary,
+                                        border: `1px solid ${theme.border}`,
+                                        borderRadius: '6px',
+                                        color: theme.text,
+                                        cursor: 'pointer',
+                                        fontSize: '13px',
+                                        height: '100%',
+                                        whiteSpace: 'nowrap'
+                                    }}
+                                >
+                                    Use Secret ▼
+                                </button>
+                                {showSecretSelect && (
+                                    <div style={{
+                                        position: 'absolute',
+                                        right: 0,
+                                        top: '100%',
+                                        marginTop: '4px',
+                                        background: theme.card,
+                                        border: `1px solid ${theme.border}`,
+                                        borderRadius: '6px',
+                                        boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+                                        zIndex: 10,
+                                        minWidth: '200px',
+                                        overflow: 'hidden'
+                                    }}>
+                                        {secrets.map(secret => (
+                                            <button
+                                                key={secret.id}
+                                                type="button"
+                                                onClick={() => handleSecretSelect(secret.id)}
+                                                style={{
+                                                    display: 'block',
+                                                    width: '100%',
+                                                    padding: '8px 12px',
+                                                    textAlign: 'left',
+                                                    background: 'transparent',
+                                                    border: 'none',
+                                                    color: theme.text,
+                                                    cursor: 'pointer',
+                                                    fontSize: '13px',
+                                                    borderBottom: `1px solid ${theme.borderLight}`
+                                                }}
+                                                onMouseEnter={(e) => e.target.style.background = theme.bgSecondary}
+                                                onMouseLeave={(e) => e.target.style.background = 'transparent'}
+                                            >
+                                                {secret.name}
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </div>
                   </div>
                   <div style={{ fontSize: '11px', color: theme.textMuted }}>
                     Generate API key at dashboard.meraki.com → Organization → Settings → Dashboard API access
@@ -1367,7 +1632,7 @@ const AddEditSiteModal = ({ site, onClose, onSave, theme }) => {
       </div>
     </div>
   );
-};
+});
 
 // Settings Modal with Debug Menu
 const SettingsModal = ({ isOpen, onClose, theme, isDark, setIsDark, sites, metricsData, user, onDeleteAllSites, onSitesImported, refreshInterval, onRefreshIntervalChange }) => {
@@ -2477,7 +2742,7 @@ const SettingsModal = ({ isOpen, onClose, theme, isDark, setIsDark, sites, metri
                           if (e.target.checked) {
                             showInfo('Desktop notifications enabled');
                             if ('Notification' in window && Notification.permission === 'default') {
-                              Notification.requestPermission();
+// Notification.requestPermission(); removed as requested
                             }
                           }
                         }}

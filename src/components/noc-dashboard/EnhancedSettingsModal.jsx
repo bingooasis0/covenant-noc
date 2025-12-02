@@ -828,15 +828,6 @@ const EnhancedSettingsModal = ({
 
         {/* Content Area */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: theme.bg }}>
-          {/* Hidden File Input for Import - Always rendered to ensure ref availability */}
-          <input 
-            type="file" 
-            ref={fileInputRef}
-            style={{ display: 'none' }}
-            accept=".json"
-            onChange={handleImportFileChange} 
-          />
-
           {/* Close Button */}
           <div style={{ position: 'absolute', top: '24px', right: '24px', zIndex: 1 }}>
             <button
@@ -1624,12 +1615,14 @@ const EnhancedSettingsModal = ({
                     <button 
                       type="button"
                       onClick={() => {
-                        if (fileInputRef.current) {
-                          fileInputRef.current.click();
-                        } else {
-                          showError('System Error: Import input not found. Please reload.');
-                          console.error('Import input ref is null');
-                        }
+                        const input = document.createElement('input');
+                        input.type = 'file';
+                        input.accept = '.json';
+                        input.style.display = 'none';
+                        input.onchange = handleImportFileChange;
+                        document.body.appendChild(input);
+                        input.click();
+                        setTimeout(() => document.body.removeChild(input), 1000);
                       }}
                       disabled={isImporting}
                       style={{ 

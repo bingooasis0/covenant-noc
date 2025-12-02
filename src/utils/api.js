@@ -9,12 +9,11 @@ export function getAuthHeaders() {
   };
 }
 
-// Refresh token mutex - simple flag to prevent concurrent refreshes
-let refreshPromise = null;
+// Simple mutex for token refresh
+let refreshInProgress = false;
 
 /**
  * Authenticated fetch wrapper with automatic token refresh
- * Includes mutex to prevent race conditions
  */
 export async function authFetch(url, options = {}) {
   const token = localStorage.getItem('accessToken');
@@ -37,67 +36,60 @@ export async function authFetch(url, options = {}) {
       return response;
     }
 
-    // If already refreshing, wait for that promise
-    if (refreshPromise) {
-      try {
-        await refreshPromise;
-        // Retry with new token from localStorage
-        const newToken = localStorage.getItem('accessToken');
-        if (newToken) {
-          return await fetch(url, {
-            ...options,
-            headers: {
-              ...options.headers,
-              'Authorization': `Bearer ${newToken}`
-            }
-          });
-        }
-      } catch (error) {
-        // Refresh failed, return original 401
-        return response;
+    // If already refreshing, wait a bit and retry with current token
+    if (refreshInProgress) {
+      // Wait for refresh to complete (simple polling)
+      let attempts = 0;
+      while (refreshInProgress && attempts < 50) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+        attempts++;
+      }
+      
+      const newToken = localStorage.getItem('accessToken');
+      if (newToken && newToken !== token) {
+        return await fetch(url, {
+          ...options,
+          headers: {
+            ...options.headers,
+            'Authorization': `Bearer ${newToken}`
+          }
+        });
       }
       return response;
     }
 
-    // Start refresh process
-    refreshPromise = (async () => {
-      try {
-        const refreshResponse = await fetch('/api/auth/refresh', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({ refreshToken })
-        });
-
-        if (refreshResponse.ok) {
-          const data = await refreshResponse.json();
-          localStorage.setItem('accessToken', data.accessToken);
-          if (data.refreshToken) {
-            localStorage.setItem('refreshToken', data.refreshToken);
-          }
-          return data.accessToken;
-        } else {
-          throw new Error('Token refresh failed');
-        }
-      } finally {
-        refreshPromise = null;
-      }
-    })();
+    // Start refresh
+    refreshInProgress = true;
 
     try {
-      const newToken = await refreshPromise;
-      
-      // Retry the original request with the new token
-      return await fetch(url, {
-        ...options,
+      const refreshResponse = await fetch('/api/auth/refresh', {
+        method: 'POST',
         headers: {
-          ...options.headers,
-          'Authorization': `Bearer ${newToken}`
-        }
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ refreshToken })
       });
+
+      if (refreshResponse.ok) {
+        const data = await refreshResponse.json();
+        localStorage.setItem('accessToken', data.accessToken);
+        if (data.refreshToken) {
+          localStorage.setItem('refreshToken', data.refreshToken);
+        }
+
+        // Retry original request
+        return await fetch(url, {
+          ...options,
+          headers: {
+            ...options.headers,
+            'Authorization': `Bearer ${data.accessToken}`
+          }
+        });
+      }
     } catch (error) {
-      return response; // Return original 401
+      console.error('Token refresh error:', error);
+    } finally {
+      refreshInProgress = false;
     }
   }
 

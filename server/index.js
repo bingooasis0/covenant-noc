@@ -185,6 +185,11 @@ app.post('/api/sites', requireAuth, async (req, res) => {
   try {
     const d = req.body;
 
+    // Parse monitoringInterval - ensure it's a valid number, default to 60 if invalid
+    const monitoringInterval = d.monitoringInterval !== undefined && d.monitoringInterval !== null
+      ? Math.max(1, parseInt(d.monitoringInterval) || 60) // Minimum 1 second, default 60
+      : 60;
+
     // Local database - no storage limits
     const site = await prisma.site.create({
       data: {
@@ -195,7 +200,7 @@ app.post('/api/sites', requireAuth, async (req, res) => {
         snmpCommunity: d.snmp_community || null, snmpOid: d.snmp_oid || null,
         monitoringNetflow: d.monitoring_netflow ?? false, monitoringMeraki: d.monitoring_meraki ?? false,
         apiKey: d.api_key || null, notes: d.notes || null, status: 'unknown',
-        monitoringInterval: d.monitoringInterval || 60
+        monitoringInterval: monitoringInterval
       }
     });
     if (site.monitoringIcmp) monitoring.startMonitoring(site.id, site.ip, site.failoverIp, site.monitoringSnmp ? site.snmpCommunity : null, site.monitoringInterval);
@@ -216,6 +221,12 @@ app.post('/api/sites', requireAuth, async (req, res) => {
 app.put('/api/sites/:id', requireAuth, async (req, res) => {
   try {
     const d = req.body;
+    
+    // Parse monitoringInterval - ensure it's a valid number, default to 60 if invalid
+    const monitoringInterval = d.monitoringInterval !== undefined && d.monitoringInterval !== null
+      ? Math.max(1, parseInt(d.monitoringInterval) || 60) // Minimum 1 second, default 60
+      : 60;
+    
     const site = await prisma.site.update({
       where: { id: req.params.id },
       data: {
@@ -226,15 +237,26 @@ app.put('/api/sites/:id', requireAuth, async (req, res) => {
         snmpCommunity: d.snmp_community || null, snmpOid: d.snmp_oid || null,
         monitoringNetflow: d.monitoring_netflow ?? false, monitoringMeraki: d.monitoring_meraki ?? false,
         apiKey: d.api_key || null, notes: d.notes || null,
-        monitoringInterval: d.monitoringInterval || 60
+        monitoringInterval: monitoringInterval
       }
     });
     
     // Invalidate site cache
     cache.invalidateSite(site.id);
     
-    if (site.monitoringIcmp) monitoring.startMonitoring(site.id, site.ip, site.failoverIp, site.monitoringSnmp ? site.snmpCommunity : null, site.monitoringInterval);
-    await prisma.auditLog.create({ data: { userId: req.user.userId, action: 'site_updated', details: { siteId: site.id, siteName: site.name } } });
+    // ALWAYS stop monitoring first to clear any existing interval
+    monitoring.stopMonitoring(site.id);
+    
+    // Then restart monitoring if ICMP monitoring is enabled
+    if (site.monitoringIcmp) {
+      const snmpCommunity = site.monitoringSnmp ? site.snmpCommunity : null;
+      monitoring.startMonitoring(site.id, site.ip, site.failoverIp, snmpCommunity, site.monitoringInterval);
+      console.log(`[Site Update] Restarted monitoring for site ${site.id} with interval ${site.monitoringInterval}s`);
+    } else {
+      console.log(`[Site Update] Monitoring disabled for site ${site.id}`);
+    }
+    
+    await prisma.auditLog.create({ data: { userId: req.user.userId, action: 'site_updated', details: { siteId: site.id, siteName: site.name, monitoringInterval: site.monitoringInterval } } });
     res.json(site);
   } catch (error) {
     console.error(error);
@@ -387,17 +409,17 @@ app.post('/api/sites/import', requireAuth, async (req, res) => {
 
         if (targetId) {
           // Update existing
-          await prisma.site.update({
+          const updatedSite = await prisma.site.update({
             where: { id: targetId },
             data: siteData
           });
           summary.updated += 1;
-          restartQueue.push({ id: targetId, ip, failoverIp: siteData.failoverIp, monitoringIcmp: siteData.monitoringIcmp, monitoringSnmp: siteData.monitoringSnmp, snmpCommunity: siteData.snmpCommunity });
+          restartQueue.push({ id: targetId, ip, failoverIp: siteData.failoverIp, monitoringIcmp: siteData.monitoringIcmp, monitoringSnmp: siteData.monitoringSnmp, snmpCommunity: siteData.snmpCommunity, monitoringInterval: updatedSite.monitoringInterval || 60 });
         } else {
           // Local database - no storage limits
           const newSite = await prisma.site.create({ data: siteData });
           summary.created += 1;
-          restartQueue.push({ id: newSite.id, ip, failoverIp: siteData.failoverIp, monitoringIcmp: siteData.monitoringIcmp, monitoringSnmp: siteData.monitoringSnmp, snmpCommunity: siteData.snmpCommunity });
+          restartQueue.push({ id: newSite.id, ip, failoverIp: siteData.failoverIp, monitoringIcmp: siteData.monitoringIcmp, monitoringSnmp: siteData.monitoringSnmp, snmpCommunity: siteData.snmpCommunity, monitoringInterval: newSite.monitoringInterval || 60 });
         }
       } catch (err) {
         summary.skipped += 1;
@@ -409,7 +431,7 @@ app.post('/api/sites/import', requireAuth, async (req, res) => {
     restartQueue.forEach(item => {
       monitoring.stopMonitoring(item.id);
       if (item.monitoringIcmp) {
-        monitoring.startMonitoring(item.id, item.ip, item.failoverIp, item.monitoringSnmp ? item.snmpCommunity : null);
+        monitoring.startMonitoring(item.id, item.ip, item.failoverIp, item.monitoringSnmp ? item.snmpCommunity : null, item.monitoringInterval || 60);
       }
     });
 

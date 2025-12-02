@@ -12,7 +12,7 @@ const prisma = new PrismaClient();
 
 // Default admin credentials
 const ADMIN_EMAIL = 'colby@covenanttechnology.net';
-const ADMIN_PASSWORD = 'admin123';
+const ADMIN_PASSWORD = 'Covenant2024!';
 const ADMIN_FIRST_NAME = 'Colby';
 const ADMIN_LAST_NAME = 'Admin';
 

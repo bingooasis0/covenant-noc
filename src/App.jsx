@@ -7,6 +7,7 @@ import MerakiDashboard from './components/MerakiDashboard';
 import CardDesignShowcase from './components/CardDesignShowcase';
 import AuditLogPage from './components/AuditLogPage';
 import Login from './components/Login';
+import ErrorBoundary from './components/ErrorBoundary';
 
 const ProtectedRoute = ({ children }) => {
   const { user, isLoaded } = useAuth();
@@ -138,7 +139,7 @@ function App() {
   }, []);
 
   return (
-    <>
+    <ErrorBoundary>
       <Toaster
         position="top-center"
         toastOptions={{
@@ -168,7 +169,9 @@ function App() {
           path="/dashboard/*"
           element={
             <ProtectedRoute>
-              <DashboardRoutes user={user} onLogout={logout} />
+              <ErrorBoundary>
+                <DashboardRoutes user={user} onLogout={logout} />
+              </ErrorBoundary>
             </ProtectedRoute>
           }
         />
@@ -184,7 +187,7 @@ function App() {
         />
         <Route path="*" element={<Navigate to="/dashboard/grid" replace />} />
       </Routes>
-    </>
+    </ErrorBoundary>
   );
 }
 

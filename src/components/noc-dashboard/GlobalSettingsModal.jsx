@@ -23,7 +23,10 @@ import {
   FileText,
   Webhook,
   AlertTriangle,
-  Speaker
+  Speaker,
+  Clock,
+  Timer,
+  Save
 } from 'lucide-react';
 import { authFetch } from '../../utils/api';
 import { notificationSounds } from '../../utils/sound';
@@ -100,11 +103,25 @@ const GlobalSettingsModal = ({
   // Debug State
   const [debugLogs, setDebugLogs] = useState([]);
 
+  // System Settings State
+  const [systemSettings, setSystemSettings] = useState({
+    sessionTimeoutMinutes: 0,
+    dataRetentionDays: 30,
+    maxSitesPerUser: 100,
+    enableRegistration: false,
+    maintenanceMode: false
+  });
+  const [settingsLoading, setSettingsLoading] = useState(false);
+  const [settingsSaving, setSettingsSaving] = useState(false);
+
   // --- Effects ---
 
   useEffect(() => {
     if (isOpen && activeTab === 'users') {
       fetchUsers();
+    }
+    if (isOpen && activeTab === 'session') {
+      fetchSystemSettings();
     }
   }, [isOpen, activeTab]);
 
@@ -275,6 +292,45 @@ const GlobalSettingsModal = ({
     setWebhooks(webhooks.filter(w => w.id !== id));
   };
 
+  // System Settings Handlers
+  const fetchSystemSettings = async () => {
+    setSettingsLoading(true);
+    try {
+      const res = await authFetch('/api/settings');
+      if (res.ok) {
+        const data = await res.json();
+        setSystemSettings(data);
+      }
+    } catch (err) {
+      console.error('Failed to fetch system settings:', err);
+    } finally {
+      setSettingsLoading(false);
+    }
+  };
+
+  const handleSaveSystemSettings = async () => {
+    setSettingsSaving(true);
+    try {
+      const res = await authFetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(systemSettings)
+      });
+      if (res.ok) {
+        showSuccess('Session settings saved');
+        // Store locally for immediate use
+        localStorage.setItem('noc-session-timeout', systemSettings.sessionTimeoutMinutes);
+      } else {
+        const err = await res.json();
+        showError(err.error || 'Failed to save settings');
+      }
+    } catch (err) {
+      showError('Failed to save settings');
+    } finally {
+      setSettingsSaving(false);
+    }
+  };
+
   // Debug Handlers
   const testBackendConnection = async () => {
     const toastId = showLoading('Testing connection...');
@@ -354,6 +410,7 @@ const GlobalSettingsModal = ({
           </div>
           <div style={{ flex: 1, paddingTop: '12px' }}>
             {renderTabButton('general', <Monitor size={18} />, 'General')}
+            {renderTabButton('session', <Timer size={18} />, 'Session & Timeout')}
             {renderTabButton('notifications', <Bell size={18} />, 'Notifications')}
             {renderTabButton('data', <Database size={18} />, 'Data & Storage')}
             {renderTabButton('users', <Users size={18} />, 'Users & Access')}
@@ -479,6 +536,131 @@ const GlobalSettingsModal = ({
                     )}
                   </div>
                 </div>
+              </>
+            )}
+
+            {activeTab === 'session' && (
+              <>
+                <SectionHeader title="Session & Timeout Settings" description="Configure session duration for NOC displays" />
+                
+                {settingsLoading ? (
+                  <div style={{ textAlign: 'center', padding: '40px', color: theme.textSecondary }}>
+                    <RefreshCw size={24} className="spin" style={{ marginBottom: '12px' }} />
+                    <p>Loading settings...</p>
+                  </div>
+                ) : (
+                  <>
+                    <div style={{ background: theme.card, padding: '24px', borderRadius: '8px', border: `1px solid ${theme.border}`, marginBottom: '24px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px' }}>
+                        <Timer size={24} color={theme.primary} />
+                        <div>
+                          <h4 style={{ margin: 0, color: theme.text }}>Session Timeout</h4>
+                          <p style={{ margin: 0, fontSize: '13px', color: theme.textSecondary }}>How long until users are automatically logged out</p>
+                        </div>
+                      </div>
+                      
+                      <div style={{ marginBottom: '20px' }}>
+                        <label style={{ display: 'block', marginBottom: '8px', color: theme.text, fontSize: '14px', fontWeight: 500 }}>
+                          Timeout Duration
+                        </label>
+                        <select
+                          value={systemSettings.sessionTimeoutMinutes}
+                          onChange={(e) => setSystemSettings({...systemSettings, sessionTimeoutMinutes: parseInt(e.target.value)})}
+                          style={{
+                            width: '100%', padding: '12px', borderRadius: '6px',
+                            border: `1px solid ${theme.border}`, background: theme.bg, color: theme.text,
+                            fontSize: '14px'
+                          }}
+                        >
+                          <option value="0">Never (Infinite Session) - Recommended for NOC</option>
+                          <option value="60">1 Hour</option>
+                          <option value="240">4 Hours</option>
+                          <option value="480">8 Hours</option>
+                          <option value="720">12 Hours</option>
+                          <option value="1440">24 Hours</option>
+                          <option value="10080">7 Days</option>
+                          <option value="43200">30 Days</option>
+                        </select>
+                      </div>
+
+                      <div style={{ 
+                        padding: '16px', 
+                        borderRadius: '8px', 
+                        background: `${theme.success}15`, 
+                        border: `1px solid ${theme.success}30`,
+                        marginBottom: '20px'
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
+                          <Check size={20} color={theme.success} style={{ flexShrink: 0, marginTop: '2px' }} />
+                          <div>
+                            <h5 style={{ margin: '0 0 4px 0', color: theme.success, fontSize: '14px' }}>NOC Display Mode</h5>
+                            <p style={{ margin: 0, color: theme.text, fontSize: '13px' }}>
+                              With "Never" timeout, this dashboard can run continuously for weeks or months on NOC displays. 
+                              The system automatically refreshes authentication tokens in the background.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={{ background: theme.card, padding: '24px', borderRadius: '8px', border: `1px solid ${theme.border}`, marginBottom: '24px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px' }}>
+                        <Database size={24} color={theme.primary} />
+                        <div>
+                          <h4 style={{ margin: 0, color: theme.text }}>Data Retention</h4>
+                          <p style={{ margin: 0, fontSize: '13px', color: theme.textSecondary }}>How long to keep monitoring history</p>
+                        </div>
+                      </div>
+                      
+                      <div>
+                        <label style={{ display: 'block', marginBottom: '8px', color: theme.text, fontSize: '14px', fontWeight: 500 }}>
+                          Keep Data For
+                        </label>
+                        <select
+                          value={systemSettings.dataRetentionDays}
+                          onChange={(e) => setSystemSettings({...systemSettings, dataRetentionDays: parseInt(e.target.value)})}
+                          style={{
+                            width: '100%', padding: '12px', borderRadius: '6px',
+                            border: `1px solid ${theme.border}`, background: theme.bg, color: theme.text,
+                            fontSize: '14px'
+                          }}
+                        >
+                          <option value="7">7 Days</option>
+                          <option value="14">14 Days</option>
+                          <option value="30">30 Days</option>
+                          <option value="60">60 Days</option>
+                          <option value="90">90 Days</option>
+                          <option value="180">180 Days</option>
+                          <option value="365">1 Year</option>
+                          <option value="0">Forever (No Cleanup)</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                      <button
+                        onClick={handleSaveSystemSettings}
+                        disabled={settingsSaving}
+                        style={{
+                          padding: '12px 24px',
+                          background: theme.primary,
+                          color: '#fff',
+                          border: 'none',
+                          borderRadius: '6px',
+                          cursor: settingsSaving ? 'not-allowed' : 'pointer',
+                          fontWeight: 600,
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px',
+                          opacity: settingsSaving ? 0.7 : 1
+                        }}
+                      >
+                        {settingsSaving ? <RefreshCw size={16} className="spin" /> : <Save size={16} />}
+                        Save Settings
+                      </button>
+                    </div>
+                  </>
+                )}
               </>
             )}
 

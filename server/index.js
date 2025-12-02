@@ -15,6 +15,7 @@ const merakiRoutes = require('./routes/meraki');
 const toolsRoutes = require('./routes/tools');
 const cardConfigRoutes = require('./routes/card-config');
 const secretsRoutes = require('./routes/secrets');
+const settingsRoutes = require('./routes/settings');
 const { requireAuth } = require('./auth/middleware');
 const monitoring = require('./monitoring');
 const limits = require('./limits');
@@ -95,6 +96,9 @@ app.use('/api/card-config', requireAuth, cardConfigRoutes);
 
 // Secrets & Keys routes
 app.use('/api/secrets', requireAuth, secretsRoutes);
+
+// System Settings routes
+app.use('/api/settings', settingsRoutes);
 
 // ============ HEALTH CHECK ============
 app.get('/api/health', (req, res) => {

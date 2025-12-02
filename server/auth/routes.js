@@ -61,11 +61,9 @@ router.post('/register', async (req, res) => {
     // Generate tokens
     const { accessToken, refreshToken } = generateTokenPair(user);
 
-    // Store refresh token in database
+    // Store refresh token in database (365 days for NOC displays)
     const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + 7); // 7 days
-
-    // Local database - no storage limits
+    expiresAt.setFullYear(expiresAt.getFullYear() + 1); // 1 year for long-running displays
 
     await prisma.refreshToken.create({
       data: {
@@ -75,7 +73,6 @@ router.post('/register', async (req, res) => {
       }
     });
 
-    // Local database - no limits
     await prisma.auditLog.create({
       data: {
         userId: user.id,
@@ -151,11 +148,9 @@ router.post('/login', async (req, res) => {
     // Invalidate user cache after login
     cache.invalidateUser(user.id, user.email);
 
-    // Store refresh token in database
+    // Store refresh token in database (365 days for NOC displays)
     const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + 7); // 7 days
-
-    // Local database - no storage limits
+    expiresAt.setFullYear(expiresAt.getFullYear() + 1); // 1 year for long-running displays
 
     await prisma.refreshToken.create({
       data: {
@@ -165,7 +160,6 @@ router.post('/login', async (req, res) => {
       }
     });
 
-    // Local database - no limits
     await prisma.auditLog.create({
       data: {
         userId: user.id,
@@ -243,11 +237,9 @@ router.post('/refresh', async (req, res) => {
     // Invalidate token cache
     cache.invalidateRefreshToken(refreshToken);
 
-    // Store new refresh token
+    // Store new refresh token (365 days for NOC displays)
     const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + 7);
-
-    // Local database - no storage limits
+    expiresAt.setFullYear(expiresAt.getFullYear() + 1); // 1 year for long-running displays
 
     await prisma.refreshToken.create({
       data: {

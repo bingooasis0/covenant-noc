@@ -1,11 +1,36 @@
-import { createContext, useContext, useState, useEffect } from 'react';
+import { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 
 const AuthContext = createContext(null);
+
+// Token refresh interval (refresh every 20 minutes to stay ahead of 24h expiry)
+const TOKEN_REFRESH_INTERVAL = 20 * 60 * 1000; // 20 minutes
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [isLoaded, setIsLoaded] = useState(false);
   const [accessToken, setAccessToken] = useState(localStorage.getItem('accessToken'));
+  const refreshIntervalRef = useRef(null);
+  const lastActivityRef = useRef(Date.now());
+
+  // Track user activity for session timeout
+  useEffect(() => {
+    const updateActivity = () => {
+      lastActivityRef.current = Date.now();
+    };
+
+    // Track various user activities
+    window.addEventListener('mousemove', updateActivity);
+    window.addEventListener('keydown', updateActivity);
+    window.addEventListener('click', updateActivity);
+    window.addEventListener('scroll', updateActivity);
+
+    return () => {
+      window.removeEventListener('mousemove', updateActivity);
+      window.removeEventListener('keydown', updateActivity);
+      window.removeEventListener('click', updateActivity);
+      window.removeEventListener('scroll', updateActivity);
+    };
+  }, []);
 
   // Check if user is authenticated on mount
   useEffect(() => {
@@ -42,7 +67,7 @@ export function AuthProvider({ children }) {
     checkAuth();
   }, []);
 
-  const refreshToken = async () => {
+  const refreshToken = useCallback(async () => {
     const refresh = localStorage.getItem('refreshToken');
     if (!refresh) {
       return false;
@@ -69,17 +94,57 @@ export function AuthProvider({ children }) {
           const { user: userData } = await userResponse.json();
           setUser(userData);
         }
+        console.log('[Auth] Token refreshed successfully');
         return true;
       } else {
         // Refresh failed, but don't automatically logout
         // Just return false to indicate failure
+        console.warn('[Auth] Token refresh failed - response not ok');
         return false;
       }
     } catch (error) {
-      console.error('Token refresh failed:', error);
+      console.error('[Auth] Token refresh failed:', error);
       return false;
     }
-  };
+  }, []);
+
+  // Auto-refresh tokens for long-running NOC displays
+  useEffect(() => {
+    if (!user) return;
+
+    // Check session timeout setting
+    const checkAndRefresh = async () => {
+      const sessionTimeout = parseInt(localStorage.getItem('noc-session-timeout') || '0');
+      
+      // If timeout is set (not 0/infinite), check for inactivity
+      if (sessionTimeout > 0) {
+        const inactiveMinutes = (Date.now() - lastActivityRef.current) / (1000 * 60);
+        if (inactiveMinutes >= sessionTimeout) {
+          console.log('[Auth] Session timeout due to inactivity');
+          await logout();
+          return;
+        }
+      }
+
+      // Proactively refresh token to keep session alive
+      const token = localStorage.getItem('accessToken');
+      if (token) {
+        await refreshToken();
+      }
+    };
+
+    // Initial check
+    checkAndRefresh();
+
+    // Set up interval for periodic refresh
+    refreshIntervalRef.current = setInterval(checkAndRefresh, TOKEN_REFRESH_INTERVAL);
+
+    return () => {
+      if (refreshIntervalRef.current) {
+        clearInterval(refreshIntervalRef.current);
+      }
+    };
+  }, [user, refreshToken]);
 
   const login = async (email, password) => {
     try {
@@ -129,7 +194,13 @@ export function AuthProvider({ children }) {
     }
   };
 
-  const logout = async () => {
+  const logout = useCallback(async () => {
+    // Clear refresh interval
+    if (refreshIntervalRef.current) {
+      clearInterval(refreshIntervalRef.current);
+      refreshIntervalRef.current = null;
+    }
+
     try {
       const refresh = localStorage.getItem('refreshToken');
       const token = localStorage.getItem('accessToken');
@@ -151,7 +222,7 @@ export function AuthProvider({ children }) {
       setUser(null);
       setAccessToken(null);
     }
-  };
+  }, []);
 
   const value = {
     user,

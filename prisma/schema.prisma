@@ -126,3 +126,14 @@ model Secret {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
+
+model SystemSettings {
+  id                    String   @id @default("system")
+  sessionTimeoutMinutes Int      @default(0) // 0 = never timeout (infinite)
+  dataRetentionDays     Int      @default(30) // How long to keep monitoring data
+  maxSitesPerUser       Int      @default(100)
+  enableRegistration    Boolean  @default(false)
+  maintenanceMode       Boolean  @default(false)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+}

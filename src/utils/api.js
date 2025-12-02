@@ -45,71 +45,78 @@ export async function authFetch(url, options = {}) {
   if (response.status === 401) {
     const refreshToken = localStorage.getItem('refreshToken');
 
-    if (refreshToken) {
-      if (isRefreshing) {
-        // If refreshing, queue this request
-        try {
-          const newToken = await new Promise((resolve, reject) => {
-            failedQueue.push({ resolve, reject });
-          });
-          
-          // Retry with new token
-          return await fetch(url, {
-            ...options,
-            headers: {
-              ...options.headers,
-              'Authorization': `Bearer ${newToken}`
-            }
-          });
-        } catch (error) {
-          return response; // Return original 401 if refresh fails
-        }
-      }
+    if (!refreshToken) {
+      // No refresh token, return 401
+      return response;
+    }
 
-      isRefreshing = true;
-
+    // If already refreshing, wait for it
+    if (isRefreshing) {
       try {
-        // Attempt to refresh the token
-        const refreshResponse = await fetch('/api/auth/refresh', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({ refreshToken })
+        const newToken = await new Promise((resolve, reject) => {
+          failedQueue.push({ resolve, reject });
         });
-
-        if (refreshResponse.ok) {
-          const data = await refreshResponse.json();
-
-          // Store the new access token
-          localStorage.setItem('accessToken', data.accessToken);
-          localStorage.setItem('refreshToken', data.refreshToken); // Update refresh token too if rotated
-
-          // Process queue
-          processQueue(null, data.accessToken);
-          isRefreshing = false;
-
-          // Retry the original request with the new token
-          const newHeaders = {
+        
+        // Retry with new token
+        return await fetch(url, {
+          ...options,
+          headers: {
             ...options.headers,
-            'Authorization': `Bearer ${data.accessToken}`
-          };
-
-          response = await fetch(url, {
-            ...options,
-            headers: newHeaders
-          });
-        } else {
-          // Refresh failed
-          isRefreshing = false;
-          processQueue(new Error('Token refresh failed'));
-          // Don't automatically logout or redirect here, let the app handle the 401
-        }
+            'Authorization': `Bearer ${newToken}`
+          }
+        });
       } catch (error) {
-        // Network error or other issue
-        isRefreshing = false;
-        processQueue(error);
+        // Queue was rejected, return original 401
+        return response;
       }
+    }
+
+    // Start refresh process
+    isRefreshing = true;
+
+    try {
+      const refreshResponse = await fetch('/api/auth/refresh', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ refreshToken })
+      });
+
+      if (refreshResponse.ok) {
+        const data = await refreshResponse.json();
+
+        // Store the new tokens
+        localStorage.setItem('accessToken', data.accessToken);
+        if (data.refreshToken) {
+          localStorage.setItem('refreshToken', data.refreshToken);
+        }
+
+        // Resolve all queued requests with new token
+        processQueue(null, data.accessToken);
+        isRefreshing = false;
+
+        // Retry the original request with the new token
+        const newHeaders = {
+          ...options.headers,
+          'Authorization': `Bearer ${data.accessToken}`
+        };
+
+        return await fetch(url, {
+          ...options,
+          headers: newHeaders
+        });
+      } else {
+        // Refresh failed - clear tokens and reject queue
+        isRefreshing = false;
+        processQueue(new Error('Token refresh failed'));
+        return response; // Return original 401
+      }
+    } catch (error) {
+      // Network error or other issue
+      isRefreshing = false;
+      processQueue(error);
+      return response; // Return original 401
     }
   }
 

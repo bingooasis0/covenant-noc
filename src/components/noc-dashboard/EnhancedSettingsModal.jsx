@@ -417,7 +417,9 @@ const EnhancedSettingsModal = ({
       const a = document.createElement('a');
       a.href = url;
       a.download = `nocturnal-sites-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+      document.body.appendChild(a); // Required for Firefox
       a.click();
+      document.body.removeChild(a); // Cleanup
       URL.revokeObjectURL(url);
       
       dismissToast(loadingToastId);

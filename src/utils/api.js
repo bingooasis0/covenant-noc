@@ -9,9 +9,6 @@ export function getAuthHeaders() {
   };
 }
 
-// Simple mutex for token refresh
-let refreshInProgress = false;
-
 /**
  * Authenticated fetch wrapper with automatic token refresh
  */
@@ -32,65 +29,46 @@ export async function authFetch(url, options = {}) {
   if (response.status === 401) {
     const refreshToken = localStorage.getItem('refreshToken');
 
-    if (!refreshToken) {
-      return response;
-    }
-
-    // If already refreshing, wait a bit and retry with current token
-    if (refreshInProgress) {
-      // Wait for refresh to complete (simple polling)
-      let attempts = 0;
-      while (refreshInProgress && attempts < 50) {
-        await new Promise(resolve => setTimeout(resolve, 100));
-        attempts++;
-      }
-      
-      const newToken = localStorage.getItem('accessToken');
-      if (newToken && newToken !== token) {
-        return await fetch(url, {
-          ...options,
+    if (refreshToken) {
+      try {
+        // Attempt to refresh the token
+        const refreshResponse = await fetch('/api/auth/refresh', {
+          method: 'POST',
           headers: {
-            ...options.headers,
-            'Authorization': `Bearer ${newToken}`
-          }
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ refreshToken })
         });
-      }
-      return response;
-    }
 
-    // Start refresh
-    refreshInProgress = true;
+        if (refreshResponse.ok) {
+          const data = await refreshResponse.json();
 
-    try {
-      const refreshResponse = await fetch('/api/auth/refresh', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ refreshToken })
-      });
+          // Store the new access token
+          localStorage.setItem('accessToken', data.accessToken);
+          if (data.refreshToken) {
+            localStorage.setItem('refreshToken', data.refreshToken);
+          }
 
-      if (refreshResponse.ok) {
-        const data = await refreshResponse.json();
-        localStorage.setItem('accessToken', data.accessToken);
-        if (data.refreshToken) {
-          localStorage.setItem('refreshToken', data.refreshToken);
-        }
-
-        // Retry original request
-        return await fetch(url, {
-          ...options,
-          headers: {
+          // Retry the original request with the new token
+          const newHeaders = {
             ...options.headers,
             'Authorization': `Bearer ${data.accessToken}`
-          }
-        });
+          };
+
+          response = await fetch(url, {
+            ...options,
+            headers: newHeaders
+          });
+        }
+        // If refresh fails, just return the original 401 response
+        // Don't automatically logout or redirect
+      } catch (error) {
+        // If refresh request fails, just return the original 401 response
+        // Don't automatically logout or redirect
       }
-    } catch (error) {
-      console.error('Token refresh error:', error);
-    } finally {
-      refreshInProgress = false;
     }
+    // If no refresh token, just return the original 401 response
+    // Don't automatically logout or redirect
   }
 
   return response;

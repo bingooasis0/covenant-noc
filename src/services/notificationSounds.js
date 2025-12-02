@@ -7,16 +7,35 @@
 class NotificationSounds {
   constructor() {
     this.audioContext = null;
-
-    // Load settings from localStorage
-    const savedEnabled = localStorage.getItem('noc-sounds-enabled');
-    this.enabled = savedEnabled === null ? true : savedEnabled === 'true';
-
-    const savedVolume = localStorage.getItem('noc-sound-volume');
-    this.volume = savedVolume ? parseFloat(savedVolume) : 0.3;
+    this._enabled = null;
+    this._volume = null;
 
     // Initialize on first use to avoid autoplay restrictions
     this.initAudioContext = this.initAudioContext.bind(this);
+  }
+
+  get enabled() {
+    if (this._enabled === null && typeof window !== 'undefined' && window.localStorage) {
+      const savedEnabled = localStorage.getItem('noc-sounds-enabled');
+      this._enabled = savedEnabled === null ? true : savedEnabled === 'true';
+    }
+    return this._enabled !== null ? this._enabled : true;
+  }
+
+  set enabled(value) {
+    this._enabled = value;
+  }
+
+  get volume() {
+    if (this._volume === null && typeof window !== 'undefined' && window.localStorage) {
+      const savedVolume = localStorage.getItem('noc-sound-volume');
+      this._volume = savedVolume ? parseFloat(savedVolume) : 0.3;
+    }
+    return this._volume !== null ? this._volume : 0.3;
+  }
+
+  set volume(value) {
+    this._volume = value;
   }
 
   initAudioContext() {

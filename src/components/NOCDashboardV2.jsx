@@ -1059,7 +1059,7 @@ const NOCDashboardV2 = ({ user, onLogout, onShowCardShowcase, onShowAuditLog }) 
     }
   };
 
-  const loadMetricsHistory = async (siteId, hours = 6) => {
+  const loadMetricsHistory = async (siteId, hours = 24) => {
     setLoadingFlag('history', siteId, true);
     try {
       const res = await authFetch(`/api/monitoring/${siteId}/history?hours=${hours}`);
@@ -1077,12 +1077,12 @@ const NOCDashboardV2 = ({ user, onLogout, onShowCardShowcase, onShowAuditLog }) 
           };
         })
         : [];
-      if (history.length === 0) {
-        return;
-      }
+      // Always set history, even if empty, so components know there's no data
       setMetricsHistory(prev => ({ ...prev, [siteId]: history }));
     } catch (err) {
       console.error(`Failed to load metrics history for site ${siteId}:`, err);
+      // Set empty array on error so components know there's no data
+      setMetricsHistory(prev => ({ ...prev, [siteId]: [] }));
     } finally {
       setLoadingFlag('history', siteId, false);
     }

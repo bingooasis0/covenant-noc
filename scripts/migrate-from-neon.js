@@ -5,12 +5,15 @@
  */
 
 const { PrismaClient } = require('@prisma/client');
+require('dotenv').config();
 
-// Neon database URL (your original)
-const NEON_URL = "postgresql://neondb_owner:npg_bycMomA7CiY4@ep-long-voice-ahfpgazt-pooler.c-3.us-east-1.aws.neon.tech/neondb?sslmode=require";
+// Neon database URL - can be set via NEON_DATABASE_URL env var or use hardcoded fallback
+const NEON_URL = process.env.NEON_DATABASE_URL || 
+  "postgresql://neondb_owner:npg_bycMomA7CiY4@ep-long-voice-ahfpgazt-pooler.c-3.us-east-1.aws.neon.tech/neondb?sslmode=require";
 
-// Local database URL
-const LOCAL_URL = "postgresql://postgres:password@localhost:5433/covenant_noc?schema=public";
+// Local database URL - use current DATABASE_URL from .env
+const LOCAL_URL = process.env.DATABASE_URL || 
+  "postgresql://postgres:password@localhost:5433/covenant_noc?schema=public";
 
 // Create separate Prisma clients for each database
 const neonPrisma = new PrismaClient({
@@ -63,6 +66,38 @@ async function migrateTable(tableName, neonQuery, localCreate, transform = (x) =
   }
 }
 
+async function compareDatabases() {
+  try {
+    console.log('\n📊 Comparing Neon vs Local database...');
+    
+    const neonSites = await neonPrisma.site.count();
+    const localSites = await localPrisma.site.count();
+    
+    const neonUsers = await neonPrisma.user.count();
+    const localUsers = await localPrisma.user.count();
+    
+    const neonMonitoring = await neonPrisma.monitoringData.count();
+    const localMonitoring = await localPrisma.monitoringData.count();
+    
+    console.log(`   Neon: ${neonSites} sites, ${neonUsers} users, ${neonMonitoring} monitoring records`);
+    console.log(`   Local: ${localSites} sites, ${localUsers} users, ${localMonitoring} monitoring records`);
+    
+    if (neonSites > localSites || neonUsers > localUsers) {
+      console.log('\n   ⚠️  Neon has more data - migration recommended');
+      return true;
+    } else if (neonSites === localSites && neonUsers === localUsers) {
+      console.log('\n   ✓ Local database appears to be up to date');
+      return false;
+    } else {
+      console.log('\n   ℹ️  Local database has more or equal data');
+      return false;
+    }
+  } catch (error) {
+    console.log(`   ⚠️  Could not compare: ${error.message}`);
+    return true; // Assume migration needed if we can't compare
+  }
+}
+
 async function main() {
   console.log('');
   console.log('========================================');
@@ -77,11 +112,36 @@ async function main() {
     // Test connections
     console.log('🔌 Testing connections...');
     
-    await neonPrisma.$queryRaw`SELECT 1`;
-    console.log('   ✓ Connected to Neon');
+    try {
+      await neonPrisma.$queryRaw`SELECT 1`;
+      console.log('   ✓ Connected to Neon');
+    } catch (error) {
+      console.log('   ⚠️  Could not connect to Neon:', error.message);
+      console.log('   ℹ️  If you don\'t have Neon access, you can skip migration');
+      console.log('   ℹ️  Set NEON_DATABASE_URL in .env if you want to migrate from Neon');
+      await neonPrisma.$disconnect();
+      await localPrisma.$disconnect();
+      return;
+    }
     
     await localPrisma.$queryRaw`SELECT 1`;
     console.log('   ✓ Connected to Local DB');
+    
+    // Compare databases
+    const needsMigration = await compareDatabases();
+    
+    if (!needsMigration) {
+      console.log('\n========================================');
+      console.log('  Migration Not Needed');
+      console.log('========================================');
+      console.log('\nYour local database appears to be up to date.');
+      console.log('If you want to force migration anyway, modify this script.');
+      await neonPrisma.$disconnect();
+      await localPrisma.$disconnect();
+      return;
+    }
+    
+    console.log('\nStarting migration...');
 
     // Migrate Users first (other tables depend on userId)
     await migrateTable(

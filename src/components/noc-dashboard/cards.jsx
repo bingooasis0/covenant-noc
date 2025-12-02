@@ -31,8 +31,20 @@ export const DetailedGridCard = ({ site, metrics, history, snmp, api, alerts, on
   const statusText = getStatusText(metrics);
 
   const graphData = useMemo(() => {
-    if (!history || history.length === 0) return [];
-    return history.slice(-30).map(h => {
+    if (!history || !Array.isArray(history) || history.length === 0) {
+      // Return empty array - graph will show empty
+      return [];
+    }
+    
+    // Need at least 2 points for AreaChart to render a line
+    // If only 1 point, duplicate it to create a visible line
+    const dataPoints = history.slice(-30);
+    if (dataPoints.length === 1) {
+      // Duplicate the single point to create a line
+      dataPoints.push({ ...dataPoints[0] });
+    }
+    
+    return dataPoints.map(h => {
       // Preserve null values for latency - don't convert to 0 (0ms is valid, null means no data)
       // The graph library will handle null by not drawing a point, which is correct
       const latency = h.latency !== null && h.latency !== undefined 

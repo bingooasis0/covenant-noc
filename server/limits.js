@@ -8,10 +8,18 @@
  * - Branches: 10
  * 
  * This module monitors usage and prevents exceeding limits.
+ * 
+ * NOTE: Limits are automatically disabled for local databases (localhost)
  */
 
 const prisma = require('./prisma');
 const cache = require('./cache');
+
+// Check if we're using a local database
+function isLocalDatabase() {
+  const dbUrl = process.env.DATABASE_URL || '';
+  return dbUrl.includes('localhost') || dbUrl.includes('127.0.0.1') || dbUrl.includes('postgresql://postgres:password@localhost');
+}
 
 // Helper to detect quota exceeded errors
 function isQuotaExceededError(error) {
@@ -124,6 +132,17 @@ async function estimateStorageUsage() {
  * Check if we can perform an operation without exceeding limits
  */
 async function checkStorageLimit(estimatedAdditionalBytes = 0) {
+  // Skip limit checks for local databases
+  if (isLocalDatabase()) {
+    return {
+      allowed: true,
+      currentUsage: { totalGB: 0, limitGB: Infinity },
+      projectedTotal: 0,
+      projectedGB: 0,
+      reason: null
+    };
+  }
+
   const usage = await estimateStorageUsage();
   if (!usage) return { allowed: false, reason: 'Could not estimate storage' };
 
@@ -252,6 +271,11 @@ async function aggressiveCleanup() {
  * Run automatic cleanup based on retention policies
  */
 async function runAutomaticCleanup() {
+  // Skip cleanup for local databases (no limits)
+  if (isLocalDatabase()) {
+    return;
+  }
+
   try {
     const usage = await estimateStorageUsage();
     if (!usage) return;
@@ -328,6 +352,37 @@ async function checkBeforeCreate(model, estimatedBytes) {
  * Get current usage statistics (cached)
  */
 async function getUsageStats() {
+  // Skip limit checks for local databases
+  if (isLocalDatabase()) {
+    const storage = await estimateStorageUsage();
+    return {
+      storage: storage ? {
+        used: storage.totalGB,
+        limit: Infinity,
+        percentage: 0,
+        breakdown: {
+          users: Math.round((storage.breakdown.users / (1024 * 1024)) * 100) / 100,
+          sites: Math.round((storage.breakdown.sites / (1024 * 1024)) * 100) / 100,
+          monitoringData: Math.round((storage.breakdown.monitoringData / (1024 * 1024)) * 100) / 100,
+          snmpData: Math.round((storage.breakdown.snmpData / (1024 * 1024)) * 100) / 100,
+          presets: Math.round((storage.breakdown.presets / (1024 * 1024)) * 100) / 100,
+          auditLogs: Math.round((storage.breakdown.auditLogs / (1024 * 1024)) * 100) / 100,
+          refreshTokens: Math.round((storage.breakdown.refreshTokens / (1024 * 1024)) * 100) / 100,
+          overhead: Math.round((storage.breakdown.overhead / (1024 * 1024)) * 100) / 100
+        }
+      } : null,
+      compute: {
+        limit: Infinity,
+        note: 'Local database - no compute limits'
+      },
+      network: {
+        limit: Infinity,
+        note: 'Local database - no network transfer limits'
+      },
+      retention: RETENTION_POLICIES
+    };
+  }
+
   // Cache usage stats to avoid frequent count queries
   return await cache.getOrSet(
     cache.CACHE_KEYS.USAGE_STATS,

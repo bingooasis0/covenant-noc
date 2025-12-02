@@ -15,9 +15,18 @@ const ModernGridCard = ({ site, metrics, history, onClick, isSelected, theme = {
 
   // Prepare graph data (downsample if needed for performance)
   const graphData = useMemo(() => {
-    if (!history || history.length === 0) return [];
+    if (!history || !Array.isArray(history) || history.length === 0) return [];
+    
     // Take last 20 points for the sparkline
-    return history.slice(-20).map(h => {
+    const dataPoints = history.slice(-20);
+    
+    // Need at least 2 points for AreaChart to render a line
+    if (dataPoints.length === 1) {
+      // Duplicate the single point to create a visible line
+      dataPoints.push({ ...dataPoints[0] });
+    }
+    
+    return dataPoints.map(h => {
       // Preserve null values for accurate latency representation
       const latency = h.latency !== null && h.latency !== undefined 
         ? Number(h.latency) 

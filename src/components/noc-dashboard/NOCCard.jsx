@@ -97,8 +97,16 @@ const NOCCard = ({ site, metrics, history, snmp, onClick, isSelected, layout, th
 
   // Prepare graph data - preserve null values for accurate representation
   const graphData = useMemo(() => {
-    if (!history || history.length === 0) return [];
-    return history.slice(-30).map(h => {
+    if (!history || !Array.isArray(history) || history.length === 0) return [];
+    
+    // Need at least 2 points for AreaChart to render a line
+    const dataPoints = history.slice(-30);
+    if (dataPoints.length === 1) {
+      // Duplicate the single point to create a visible line
+      dataPoints.push({ ...dataPoints[0] });
+    }
+    
+    return dataPoints.map(h => {
       // Preserve null values - don't convert to 0 (0ms is valid latency, null means no data)
       const latency = h.latency !== null && h.latency !== undefined 
         ? Number(h.latency) 

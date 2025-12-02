@@ -681,7 +681,7 @@ app.post('/api/users', requireAuth, async (req, res) => {
     }
 
     // Local database - no storage limits
-    const bcrypt = require('bcrypt');
+    const bcrypt = require('bcryptjs');
     const hashedPassword = await bcrypt.hash(password, 12);
 
     const user = await prisma.user.create({
@@ -747,7 +747,7 @@ app.put('/api/users/:id', requireAuth, async (req, res) => {
       if (password.length < 6) {
         return res.status(400).json({ error: 'Password must be at least 6 characters' });
       }
-      const bcrypt = require('bcrypt');
+      const bcrypt = require('bcryptjs');
       const hashedPassword = await bcrypt.hash(password, 12);
       updateData.password = hashedPassword;
     }

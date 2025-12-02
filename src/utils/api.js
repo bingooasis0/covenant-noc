@@ -9,8 +9,24 @@ export function getAuthHeaders() {
   };
 }
 
+// Refresh token mutex
+let isRefreshing = false;
+let failedQueue = [];
+
+const processQueue = (error, token = null) => {
+  failedQueue.forEach(prom => {
+    if (error) {
+      prom.reject(error);
+    } else {
+      prom.resolve(token);
+    }
+  });
+  failedQueue = [];
+};
+
 /**
  * Authenticated fetch wrapper with automatic token refresh
+ * Includes mutex to prevent race conditions
  */
 export async function authFetch(url, options = {}) {
   const token = localStorage.getItem('accessToken');
@@ -30,6 +46,28 @@ export async function authFetch(url, options = {}) {
     const refreshToken = localStorage.getItem('refreshToken');
 
     if (refreshToken) {
+      if (isRefreshing) {
+        // If refreshing, queue this request
+        try {
+          const newToken = await new Promise((resolve, reject) => {
+            failedQueue.push({ resolve, reject });
+          });
+          
+          // Retry with new token
+          return await fetch(url, {
+            ...options,
+            headers: {
+              ...options.headers,
+              'Authorization': `Bearer ${newToken}`
+            }
+          });
+        } catch (error) {
+          return response; // Return original 401 if refresh fails
+        }
+      }
+
+      isRefreshing = true;
+
       try {
         // Attempt to refresh the token
         const refreshResponse = await fetch('/api/auth/refresh', {
@@ -45,6 +83,11 @@ export async function authFetch(url, options = {}) {
 
           // Store the new access token
           localStorage.setItem('accessToken', data.accessToken);
+          localStorage.setItem('refreshToken', data.refreshToken); // Update refresh token too if rotated
+
+          // Process queue
+          processQueue(null, data.accessToken);
+          isRefreshing = false;
 
           // Retry the original request with the new token
           const newHeaders = {
@@ -56,16 +99,18 @@ export async function authFetch(url, options = {}) {
             ...options,
             headers: newHeaders
           });
+        } else {
+          // Refresh failed
+          isRefreshing = false;
+          processQueue(new Error('Token refresh failed'));
+          // Don't automatically logout or redirect here, let the app handle the 401
         }
-        // If refresh fails, just return the original 401 response
-        // Don't automatically logout or redirect
       } catch (error) {
-        // If refresh request fails, just return the original 401 response
-        // Don't automatically logout or redirect
+        // Network error or other issue
+        isRefreshing = false;
+        processQueue(error);
       }
     }
-    // If no refresh token, just return the original 401 response
-    // Don't automatically logout or redirect
   }
 
   return response;

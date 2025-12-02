@@ -109,11 +109,12 @@ export function AuthProvider({ children }) {
   }, []);
 
   // Auto-refresh tokens for long-running NOC displays
+  // Simplified to just check for inactivity timeout if configured
+  // Token refreshing is handled reactively by authFetch in api.js
   useEffect(() => {
     if (!user) return;
 
-    // Check session timeout setting
-    const checkAndRefresh = async () => {
+    const checkInactivity = async () => {
       const sessionTimeout = parseInt(localStorage.getItem('noc-session-timeout') || '0');
       
       // If timeout is set (not 0/infinite), check for inactivity
@@ -122,29 +123,19 @@ export function AuthProvider({ children }) {
         if (inactiveMinutes >= sessionTimeout) {
           console.log('[Auth] Session timeout due to inactivity');
           await logout();
-          return;
         }
-      }
-
-      // Proactively refresh token to keep session alive
-      const token = localStorage.getItem('accessToken');
-      if (token) {
-        await refreshToken();
       }
     };
 
-    // Initial check
-    checkAndRefresh();
-
-    // Set up interval for periodic refresh
-    refreshIntervalRef.current = setInterval(checkAndRefresh, TOKEN_REFRESH_INTERVAL);
+    // Check every minute for inactivity
+    refreshIntervalRef.current = setInterval(checkInactivity, 60 * 1000);
 
     return () => {
       if (refreshIntervalRef.current) {
         clearInterval(refreshIntervalRef.current);
       }
     };
-  }, [user, refreshToken]);
+  }, [user, logout]);
 
   const login = async (email, password) => {
     try {

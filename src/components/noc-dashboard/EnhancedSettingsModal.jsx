@@ -917,11 +917,25 @@ const EnhancedSettingsModal = ({
 
                   <SettingCard
                     icon={<Monitor />}
-                    title="Page Auto-Refresh (24/7 NOC Mode)"
-                    description="Automatically refresh the entire page to prevent memory leaks during extended monitoring sessions. Preserves your current view, filters, and focus mode."
+                    title="Page Auto-Refresh (Optional)"
+                    description="Only needed for extremely long sessions (weeks). WebSocket provides real-time updates automatically."
                     theme={theme}
                   >
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                      <div style={{ 
+                        padding: '12px', 
+                        background: `${theme.success}15`, 
+                        borderRadius: '8px',
+                        border: `1px solid ${theme.success}30`,
+                        marginBottom: '8px'
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
+                          <Activity size={16} color={theme.success} style={{ marginTop: '2px', flexShrink: 0 }} />
+                          <div style={{ fontSize: '12px', color: theme.text, lineHeight: '1.5' }}>
+                            <strong>Real-time updates are always active.</strong> Data refreshes automatically via WebSocket - no page reload needed.
+                          </div>
+                        </div>
+                      </div>
                       <Toggle 
                         checked={pageRefreshEnabled}
                         onChange={(checked) => {
@@ -929,13 +943,13 @@ const EnhancedSettingsModal = ({
                             onPageRefreshChange(checked, pageRefreshInterval);
                           }
                         }}
-                        label="Enable automatic page refresh"
+                        label="Enable page refresh (only for memory cleanup)"
                         theme={theme}
                       />
                       {pageRefreshEnabled && (
                         <div>
                           <label style={{ display: 'block', marginBottom: '8px', color: theme.textSecondary, fontSize: '13px', fontWeight: 500 }}>
-                            Page Refresh Interval
+                            Page Refresh Interval (Minimum 30 min)
                           </label>
                           <select
                             value={pageRefreshInterval}
@@ -956,11 +970,11 @@ const EnhancedSettingsModal = ({
                               cursor: 'pointer'
                             }}
                           >
-                            <option value="5">5 Minutes</option>
-                            <option value="10">10 Minutes (Recommended)</option>
-                            <option value="15">15 Minutes</option>
                             <option value="30">30 Minutes</option>
-                            <option value="60">1 Hour</option>
+                            <option value="60">1 Hour (Recommended)</option>
+                            <option value="120">2 Hours</option>
+                            <option value="240">4 Hours</option>
+                            <option value="480">8 Hours</option>
                           </select>
                           <div style={{ 
                             marginTop: '12px', 
@@ -972,7 +986,7 @@ const EnhancedSettingsModal = ({
                             <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
                               <Info size={16} color={theme.primary} style={{ marginTop: '2px', flexShrink: 0 }} />
                               <div style={{ fontSize: '12px', color: theme.textSecondary, lineHeight: '1.5' }}>
-                                The page will automatically refresh every {pageRefreshInterval} minutes to prevent memory buildup during extended monitoring. Your current view mode, filters, focus mode, and fullscreen state will be preserved.
+                                Page refresh is only for memory cleanup on multi-week displays. Your view state is preserved.
                               </div>
                             </div>
                           </div>

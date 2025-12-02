@@ -201,14 +201,14 @@ const NOCDashboardV2 = ({ user, onLogout, onShowCardShowcase, onShowAuditLog }) 
     extendedHistory: {}
   });
 
-  // Auto-refresh state
+  // Auto-refresh state - DISABLED by default (WebSocket handles real-time updates)
   const [pageRefreshEnabled, setPageRefreshEnabled] = useState(() => {
     const saved = localStorage.getItem('noc-page-refresh-enabled');
-    return saved === null ? true : saved === 'true';
+    return saved === 'true'; // Default to FALSE - WebSocket handles real-time
   });
   const [pageRefreshInterval, setPageRefreshInterval] = useState(() => {
     const saved = localStorage.getItem('noc-page-refresh-interval');
-    return saved ? parseInt(saved) : 10; // Default 10 minutes
+    return saved ? parseInt(saved) : 60; // Default 60 minutes if enabled
   });
 
   const setLoadingFlag = useCallback((category, key, value) => {
@@ -749,11 +749,16 @@ const NOCDashboardV2 = ({ user, onLogout, onShowCardShowcase, onShowAuditLog }) 
     return () => clearInterval(interval);
   }, [sites, refreshInterval, user]);
 
-  // Auto page refresh for 24/7 NOC displays (preserves view state)
+  // Auto page refresh - DISABLED by default
+  // WebSocket provides real-time updates, page refresh is only needed for memory leak prevention
+  // on very long-running displays (days/weeks). Enable manually in settings if needed.
   useEffect(() => {
     if (!pageRefreshEnabled) return;
 
     const refreshIntervalMs = pageRefreshInterval * 60 * 1000; // Convert minutes to ms
+    
+    // Minimum 30 minutes to prevent annoying refreshes
+    if (refreshIntervalMs < 30 * 60 * 1000) return;
 
     const interval = setInterval(() => {
       console.log('[Auto-Refresh] Refreshing page to prevent memory leaks (preserving state)...');

@@ -828,6 +828,15 @@ const EnhancedSettingsModal = ({
 
         {/* Content Area */}
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: theme.bg }}>
+          {/* Hidden File Input for Import - Always rendered to ensure ref availability */}
+          <input 
+            type="file" 
+            ref={fileInputRef}
+            style={{ display: 'none' }}
+            accept=".json"
+            onChange={handleImportFileChange} 
+          />
+
           {/* Close Button */}
           <div style={{ position: 'absolute', top: '24px', right: '24px', zIndex: 1 }}>
             <button
@@ -1612,16 +1621,16 @@ const EnhancedSettingsModal = ({
                     description="Restore sites from a JSON backup file"
                     theme={theme}
                   >
-                    <input 
-                      type="file" 
-                      ref={fileInputRef}
-                      style={{ display: 'none' }}
-                      accept=".json"
-                      onChange={handleImportFileChange}
-                    />
                     <button 
                       type="button"
-                      onClick={() => fileInputRef.current.click()}
+                      onClick={() => {
+                        if (fileInputRef.current) {
+                          fileInputRef.current.click();
+                        } else {
+                          showError('System Error: Import input not found. Please reload.');
+                          console.error('Import input ref is null');
+                        }
+                      }}
                       disabled={isImporting}
                       style={{ 
                         width: '100%', 
@@ -1634,7 +1643,7 @@ const EnhancedSettingsModal = ({
                         display: 'flex', 
                         justifyContent: 'center', 
                         alignItems: 'center', 
-                        gap: '8px',
+                        gap: '8px', 
                         fontWeight: 600,
                         fontSize: '14px'
                       }}
